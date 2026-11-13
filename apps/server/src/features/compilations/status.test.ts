@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CompileJobResult } from '@latexweb/shared';
-import type { JobSnapshot } from './compilations.queue';
-import { artifactAvailability, buildStatusResponse } from './compilations.status';
+import type { JobSnapshot } from './queue';
+import { artifactAvailability, buildStatusResponse } from './status';
 
 const ID = '3b241101-e2bb-4255-8caf-4136c566a962';
 const TTL = 3600;

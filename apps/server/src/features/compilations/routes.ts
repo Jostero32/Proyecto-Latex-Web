@@ -9,10 +9,10 @@ import {
 } from '@latexweb/shared';
 import type { CompilationsConfig } from '../../config';
 import { sendError } from '../../lib/http-error';
-import type { CompileQueue } from './compilations.queue';
-import { artifactAvailability, buildStatusResponse, type ArtifactErrorCode } from './compilations.status';
-import type { CompilationsStorage } from './compilations.storage';
-import { readUpload, UploadError, validateUpload } from './compilations.upload';
+import type { CompileQueue } from './queue';
+import { artifactAvailability, buildStatusResponse, type ArtifactErrorCode } from './status';
+import type { CompilationsStorage } from './storage';
+import { readUpload, UploadError, validateUpload } from './upload';
 
 export interface CompilationsDeps {
   queue: CompileQueue;

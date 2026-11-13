@@ -3,9 +3,9 @@ import { Redis } from 'ioredis';
 import type { ServiceName } from '@latexweb/shared';
 import { buildApp } from './app';
 import { loadConfig } from './config';
-import { COLLAB_PATH } from './modules/collab/collab.websocket';
-import { createBullCompileQueue } from './modules/compilations/compilations.queue';
-import { createLocalCompilationsStorage } from './modules/compilations/compilations.storage';
+import { COLLAB_PATH } from './features/collab';
+import { createBullCompileQueue } from './features/compilations';
+import { createLocalCompilationsStorage } from './features/compilations';
 
 const service: ServiceName = 'server';
 

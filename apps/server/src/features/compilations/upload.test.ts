@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { UploadError, validateUpload, type RawUpload } from './compilations.upload';
+import { UploadError, validateUpload, type RawUpload } from './upload';
 
 const file = (filename: string, text = 'x') => ({ filename, data: Buffer.from(text) });
 

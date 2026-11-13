@@ -9,8 +9,8 @@ import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CompileJobData, CompileJobResult } from '@latexweb/shared';
-import { createBullCompileQueue, type CompileQueue } from '../../src/modules/compilations/compilations.queue';
-import { buildStatusResponse } from '../../src/modules/compilations/compilations.status';
+import { createBullCompileQueue, type CompileQueue } from '../../src/features/compilations/queue';
+import { buildStatusResponse } from '../../src/features/compilations/status';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
 

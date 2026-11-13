@@ -27,9 +27,10 @@ apps/server/src:
 - `config.ts`: configuración; único lugar donde se lee `process.env`
 - `plugins/`: plugins de Fastify compartidos entre módulos (p. ej. multipart)
 - `lib/`: utilidades sin lógica de negocio (no importan de `modules/`)
-- `modules/<funcionalidad>/`: todo lo de una funcionalidad, en archivos
-  `<funcionalidad>.<rol>.ts`, p. ej. `compilations.routes.ts`, `compilations.storage.ts`,
-  `collab.websocket.ts`. Un módulo no importa archivos internos de otro módulo.
+- `features/<funcionalidad>/`: todo lo de una funcionalidad. Los archivos se nombran por su rol, sin
+  repetir el nombre de la carpeta (`features/compilations/routes.ts`, `storage.ts`, `upload.ts`).
+  `index.ts` es su API pública: desde fuera de la carpeta se importa solo `index.ts`, nunca un
+  archivo interno de otra funcionalidad.
 
 apps/compiler/src:
 - `index.ts` (arranque) y `config.ts` (único lugar donde se lee `process.env`)

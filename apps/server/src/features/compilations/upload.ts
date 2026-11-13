@@ -14,7 +14,7 @@ import {
   type Engine,
 } from '@latexweb/shared';
 import type { UploadLimits } from '../../config';
-import type { ProjectFile } from './compilations.storage';
+import type { ProjectFile } from './storage';
 
 export interface RawUpload {
   /** Archivos tal como llegaron: filename sin normalizar. */

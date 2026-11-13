@@ -1,7 +1,7 @@
 // Traducción del job de BullMQ a la respuesta de estado y a la disponibilidad de los artefactos.
 // Funciones puras. Ver docs/specs/compilacion.md, "Estados y resultado" y "Endpoints".
 import type { ArtifactKind, CompilationErrorCode, CompilationStatusResponse } from '@latexweb/shared';
-import type { JobSnapshot } from './compilations.queue';
+import type { JobSnapshot } from './queue';
 
 export function buildStatusResponse(id: string, job: JobSnapshot, ttlSeconds: number): CompilationStatusResponse {
   const response: CompilationStatusResponse = {

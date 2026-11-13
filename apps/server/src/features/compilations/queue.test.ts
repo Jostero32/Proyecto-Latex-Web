@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapState } from './compilations.queue';
+import { mapState } from './queue';
 
 describe('mapState', () => {
   it.each([

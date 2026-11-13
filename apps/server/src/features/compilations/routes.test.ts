@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CompileJobData, CompileJobResult } from '@latexweb/shared';
 import { buildApp } from '../../app';
 import type { CompilationsConfig } from '../../config';
-import type { CompileQueue, JobSnapshot } from './compilations.queue';
-import { createLocalCompilationsStorage } from './compilations.storage';
+import type { CompileQueue, JobSnapshot } from './queue';
+import { createLocalCompilationsStorage } from './storage';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MB = 1024 * 1024;

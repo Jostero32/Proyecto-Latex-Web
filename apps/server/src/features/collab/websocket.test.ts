@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { buildApp } from '../../app';
-import { COLLAB_PATH } from './collab.websocket';
+import { COLLAB_PATH } from './websocket';
 
 let app: FastifyInstance;
 let base: string;
