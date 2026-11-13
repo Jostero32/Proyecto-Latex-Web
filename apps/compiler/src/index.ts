@@ -1,21 +1,18 @@
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { COMPILE_QUEUE, type ServiceName } from '@latexweb/shared';
+import { loadConfig } from './config';
+import { processCompileJob } from './worker/processor';
 
 const service: ServiceName = 'compiler';
+const config = loadConfig();
 
 // BullMQ exige maxRetriesPerRequest: null en las conexiones de workers
-const connection = new Redis(process.env.REDIS_URL ?? 'redis://127.0.0.1:6379', {
+const connection = new Redis(config.redisUrl, {
   maxRetriesPerRequest: null,
 });
 
-const worker = new Worker(
-  COMPILE_QUEUE,
-  async () => {
-    throw new Error('Compilación no implementada');
-  },
-  { connection },
-);
+const worker = new Worker(COMPILE_QUEUE, processCompileJob, { connection });
 
 worker.on('ready', () => console.log(`${service} escuchando la cola "${COMPILE_QUEUE}"`));
 

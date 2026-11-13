@@ -47,8 +47,9 @@ worker es `apps/compiler`, un proceso aparte.
 - Estructura: `<root>/<id>/input/**` (lo escribe la API), `<root>/<id>/out/` (lo monta el contenedor) y
   `<root>/<id>/output.{pdf,log}` (los publica el worker con un rename atómico).
 - Interfaces chicas por rol, para reemplazarlas por MinIO después sin tocar las rutas ni el processor:
-  - API (`apps/server/src/storage.ts`): `saveInputs(id, files)`, `openArtifact(id, kind)` y `remove(id)`.
-  - Worker (`apps/compiler/src/workspace.ts`): `prepareInputs(id)`, `publishArtifacts(id)`,
+  - API (`apps/server/src/modules/compilations/compilations.storage.ts`): `saveInputs(id, files)`,
+    `openArtifact(id, kind)` y `remove(id)`.
+  - Worker (`apps/compiler/src/workspace/workspace.ts`): `prepareInputs(id)`, `publishArtifacts(id)`,
     `cleanupWork(id)` y `sweepExpired(maxAgeMs)`.
 - `publishArtifacts` usa `lstat`, acepta solo archivos regulares y aplica un tamaño máximo.
 - Al arrancar, el worker rechaza una raíz que contenga `,`, porque rompe la sintaxis de `--mount`.
@@ -83,7 +84,7 @@ worker es `apps/compiler`, un proceso aparte.
 
 ### Ejecución en Docker
 Se usa `child_process.spawn('docker', args)` con los argumentos en un array (nunca `shell: true`). Los
-argumentos salen de una función pura (`docker-args.ts`):
+argumentos salen de una función pura (`apps/compiler/src/docker/docker-args.ts`):
 
 ```
 run --rm --name latexweb-compile-<id> --label latexweb.compile=<id> --init
@@ -205,16 +206,20 @@ Los errores tienen la forma `{ error: CompilationErrorCode, message }`.
 **Crear**
 - `packages/shared/src/compilation.ts`, `project-paths.ts` y `project-paths.test.ts`
 - `apps/compiler/docker/Dockerfile`, `latexweb-compile.sh`, `warmup-fonts.tex` y `warmup-biber.tex`
-- `apps/compiler/src/config.ts`, `docker-args.ts` (+ test), `workspace.ts` (+ test), `runner.ts`,
-  `processor.ts` y `compile.integration.test.ts`
-- `apps/server/src/config.ts`, `storage.ts`, `upload.ts` (+ test), `routes/compilations.ts` y
-  `compilations.test.ts`
+- `apps/compiler/src/`: `docker/docker-args.ts` (+ test), `docker/runner.ts` (+ test),
+  `workspace/workspace.ts` (+ test) y `worker/processor.ts` (+ test)
+- `apps/compiler/test/integration/compile.test.ts`
+- `apps/server/src/modules/compilations/`: `compilations.routes.ts`, `compilations.storage.ts` y
+  `compilations.upload.ts`, cada uno con su `.test.ts` al lado
+- `apps/server/src/plugins/multipart.ts` (registro de `@fastify/multipart` con sus límites)
 - `.gitattributes` con `*.sh text eol=lf` y `Dockerfile text eol=lf` (con CRLF, `/bin/sh` falla en el
   contenedor)
 
 **Modificar**
 - `packages/shared/src/index.ts`: reexportar.
-- `apps/compiler/src/index.ts`: processor real, concurrencia, barrido y comprobación de Docker.
+- `apps/compiler/src/index.ts` y `config.ts` (ya existen): processor real, concurrencia, barrido,
+  comprobación de Docker y las variables `COMPILE_*`.
+- `apps/server/src/config.ts` (ya existe): raíz de almacenamiento, Redis y límites de subida.
 - `apps/compiler/package.json`: script `image:build`.
 - `apps/server/src/app.ts` (`buildApp` recibe cola y storage y registra las rutas de compilación),
   `apps/server/src/index.ts` (crea la `Queue`) y `apps/server/package.json` (dependencias).
@@ -231,15 +236,15 @@ Al terminar cada paso se corren `pnpm test`, `pnpm typecheck` y `pnpm lint`.
    - Verificar a mano que `kpsewhich -var-value` devuelve `openout_any=p` y `shell_escape=f`.
    - Compilar a mano una copia de `articulo-simple`.
    - Comprobar que el uid 1000 puede escribir en `/out` con un bind mount de Windows.
-3. **`docker-args.ts`:** con tests de que aparecen `--network none`, `-norc` y `-no-shell-escape`, de que
+3. **`docker/docker-args.ts`:** con tests de que aparecen `--network none`, `-norc` y `-no-shell-escape`, de que
    ningún argumento habilita shell-escape, del usuario en Windows y en Linux (y del mismo uid/gid en el
    tmpfs de `/work`), de que hay exactamente dos `--mount` (`/in` de solo lectura y `/out`), de que cada
    `--env` tiene la forma `NOMBRE=valor` y su nombre está en la lista blanca, de que no aparece
    `--env-file`, y de que `mainFile` va al final.
-4. **`workspace.ts`:** publicación con `lstat` y tamaño máximo, y barrido que solo toca uuids. Con tests en
+4. **`workspace/workspace.ts`:** publicación con `lstat` y tamaño máximo, y barrido que solo toca uuids. Con tests en
    directorios temporales.
-5. **`runner.ts`:** spawn, doble timeout y correspondencia de códigos. Los tests de integración van en
-   `compile.integration.test.ts` y se corren con `pnpm test:integration` (`vitest.integration.config.ts`),
+5. **`docker/runner.ts`:** spawn, doble timeout y correspondencia de códigos. Los tests de integración van en
+   `apps/compiler/test/integration/compile.test.ts` y se corren con `pnpm test:integration` (`vitest.integration.config.ts`),
    no con `pnpm test`, porque tardan ~30 s con Docker real. Cubren:
    - los 6 fixtures;
    - `malicioso`, con `LATEXWEB_CANARY` definida en el entorno del proceso de test (el que lanza docker);
@@ -251,7 +256,7 @@ Al terminar cada paso se corren `pnpm test`, `pnpm typecheck` y `pnpm lint`.
    cuando no hay imagen.
 7. **API (en `apps/server`):** `buildApp(deps)`, configuración, storage y subida, con tests de `inject`,
    una cola falsa y un directorio temporal. Incluye comprobar que `preservePath` funciona y que
-   `collab.test.ts` sigue pasando.
+   `collab.websocket.test.ts` sigue pasando.
 8. **Rutas de estado y descarga:** 404, 409, 410 y cabeceras, con sus tests.
 9. **Prueba de punta a punta:** `docker compose up -d redis`, `pnpm dev`, y con curl subir `con-imagenes` y
    `xelatex-fuentes`, consultar el estado y descargar el PDF y el log. Actualizar `.env.example`.

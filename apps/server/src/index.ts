@@ -1,10 +1,10 @@
 import type { ServiceName } from '@latexweb/shared';
 import { buildApp } from './app';
-import { COLLAB_PATH } from './collab';
+import { loadConfig } from './config';
+import { COLLAB_PATH } from './modules/collab/collab.websocket';
 
 const service: ServiceName = 'server';
-const port = Number(process.env.SERVER_PORT ?? 3000);
-const host = '127.0.0.1';
+const { host, port } = loadConfig();
 
 const app = buildApp({ logger: true });
 

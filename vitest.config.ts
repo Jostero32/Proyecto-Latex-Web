@@ -2,11 +2,11 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    // Un solo proyecto: ningún paquete necesita configuración propia todavía. (Con `projects` por
-    // glob de carpetas, el `exclude` de la raíz no se hereda.) Cuando web necesite jsdom, separar.
+    // Tests unitarios: al lado de su archivo, en src/. Los de integración (test/integration/)
+    // se corren aparte con `pnpm test:integration` (vitest.integration.config.ts). Ver CLAUDE.md.
+    // Un solo proyecto: ningún paquete necesita configuración propia todavía. Cuando web
+    // necesite jsdom, separar en proyectos.
     include: ['apps/*/src/**/*.test.{ts,tsx}', 'packages/*/src/**/*.test.ts'],
-    // Los tests con Docker real van aparte: `pnpm test:integration` (vitest.integration.config.ts).
-    exclude: ['**/node_modules/**', '**/*.integration.test.ts'],
     passWithNoTests: true,
   },
 });

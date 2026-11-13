@@ -9,7 +9,7 @@
 import { chown, constants, lstat, mkdir, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ARTIFACT_FILES, isCompilationId } from '@latexweb/shared';
-import { isSafeMountSource, type ContainerUser } from './docker-args';
+import { isSafeMountSource, type ContainerUser } from '../docker/docker-args';
 
 export interface WorkspacePaths {
   /** Ruta absoluta del proyecto, para montar en /in (solo lectura). */

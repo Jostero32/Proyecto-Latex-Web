@@ -12,12 +12,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_ENGINE, detectEngineFromSource, type Engine } from '@latexweb/shared';
-import { buildDockerRunArgs, containerName, resolveContainerUser } from './docker-args';
-import { classifyRun, runContainer } from './runner';
-import { createLocalWorkspace, type Workspace } from './workspace';
+import { buildDockerRunArgs, containerName, resolveContainerUser } from '../../src/docker/docker-args';
+import { classifyRun, runContainer } from '../../src/docker/runner';
+import { createLocalWorkspace, type Workspace } from '../../src/workspace/workspace';
 
 const IMAGE = process.env.COMPILE_IMAGE ?? 'latexweb-texlive:tl2026-1';
-const FIXTURES = fileURLToPath(new URL('../../../fixtures/latex/', import.meta.url));
+const FIXTURES = fileURLToPath(new URL('../../../../fixtures/latex/', import.meta.url));
 const CANARY = 'LATEXWEB_CANARY';
 const TEST_TIMEOUT_MS = 180_000;
 

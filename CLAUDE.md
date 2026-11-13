@@ -15,7 +15,33 @@ Editor LaTeX web con compilación, vista PDF y colaboración en tiempo real.
 - Levantar servicios: `docker compose up -d`
 - Dev: `pnpm dev`
 - Tests: `pnpm test`
+- Tests de integración (Docker real): `pnpm test:integration`
 - Lint y tipos: `pnpm lint && pnpm typecheck`
+
+## Estructura de carpetas
+Todo código nuevo sigue estas reglas.
+
+apps/server/src:
+- `index.ts`: solo arranque (config, `buildApp`, listen, apagado)
+- `app.ts`: `buildApp`, que arma la instancia de Fastify y registra plugins y módulos
+- `config.ts`: configuración; único lugar donde se lee `process.env`
+- `plugins/`: plugins de Fastify compartidos entre módulos (p. ej. multipart)
+- `lib/`: utilidades sin lógica de negocio (no importan de `modules/`)
+- `modules/<funcionalidad>/`: todo lo de una funcionalidad, en archivos
+  `<funcionalidad>.<rol>.ts`, p. ej. `compilations.routes.ts`, `compilations.storage.ts`,
+  `collab.websocket.ts`. Un módulo no importa archivos internos de otro módulo.
+
+apps/compiler/src:
+- `index.ts` (arranque) y `config.ts` (único lugar donde se lee `process.env`)
+- `worker/`: processor de la cola
+- `docker/`: argumentos de `docker run` y ejecución del contenedor
+- `workspace/`: directorios de trabajo en disco
+
+Tests:
+- Unitarios: al lado de su archivo, como `<archivo>.test.ts`. Corren con `pnpm test`.
+- De integración: en `apps/<app>/test/integration/`. Son los que necesitan servicios externos
+  (Docker, Redis, Postgres, MinIO) o son lentos. Corren con `pnpm test:integration`.
+- No crear carpetas vacías: `plugins/`, `lib/` y los módulos aparecen con su primer archivo.
 
 ## Reglas
 - Antes de una funcionalidad nueva, debe existir su spec en docs/specs/
