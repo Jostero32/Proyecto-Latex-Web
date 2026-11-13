@@ -1,0 +1,100 @@
+% Fixture MALICIOSO: intenta escapar del sandbox de compilación.
+%
+% El documento compila siempre. Por cada intento escribe en el log una línea
+%   LATEXWEB-SANDBOX: <intento>=BLOQUEADO   o   LATEXWEB-SANDBOX: <intento>=VULNERABLE
+% Una compilación segura no produce ninguna línea VULNERABLE. Las líneas
+% LATEXWEB-SANDBOX-INFO son solo informativas. Ver README.md.
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+
+\newcommand\resultado[2]{%
+  \typeout{LATEXWEB-SANDBOX: #1=#2}%
+  \par\noindent\texttt{#1}: \textbf{#2}%
+}
+
+% ---------------------------------------------------------------------------
+% 1. Shell-escape (\write18): ejecutar comandos y robar /etc/passwd.
+%    Si funciona, deja archivos en el directorio de compilación.
+% ---------------------------------------------------------------------------
+\immediate\write18{echo PWNED > pwned-write18.txt}
+\immediate\write18{cat /etc/passwd > passwd-robado.txt}
+
+% Igual que \resultado pero con otro prefijo: el test no lo evalúa, solo queda en el log.
+\newcommand\informacion[2]{%
+  \typeout{LATEXWEB-SANDBOX-INFO: #1=#2}%
+  \par\noindent\texttt{#1}: #2%
+}
+
+% ---------------------------------------------------------------------------
+% 2. Lectura de archivos fuera del proyecto. Desde TeX Live 2026 openin_any no
+%    tiene efecto: TeX puede leer cualquier archivo del contenedor. El límite es
+%    el contenedor, que no tiene datos del host ni secretos. Se comprueba con un
+%    canario: el test de integración define LATEXWEB_CANARY en el entorno del
+%    worker, y esa variable nunca debe llegar al proceso de TeX.
+% ---------------------------------------------------------------------------
+\newread\archivo
+% \leerlinea{ruta}{\macro}: guarda la primera línea del archivo, o nada si no existe.
+\newcommand\leerlinea[2]{%
+  \let#2\empty
+  \IfFileExists{#1}{%
+    \immediate\openin\archivo=#1\relax
+    {\endlinechar=-1 \global\readline\archivo to #2}%
+    \immediate\closein\archivo
+  }{}%
+}
+\makeatletter
+% \revisarcanario: busca el nombre LATEXWEB_CANARY en /proc/self/environ (variables
+% separadas por NUL, sin saltos de línea: todo el entorno queda en una sola "línea").
+\newcommand\revisarcanario{%
+  \leerlinea{/proc/self/environ}{\entorno}%
+  \edef\canario{\detokenize{LATEXWEB_CANARY}}%
+  \begingroup\edef\x{\endgroup\noexpand\in@{\canario}{\entorno}}\x
+  \ifin@
+    \resultado{canario-entorno}{VULNERABLE}%
+  \else
+    \resultado{canario-entorno}{BLOQUEADO}%
+  \fi
+}
+\makeatother
+
+\begin{document}
+
+\section*{Intentos de escape del sandbox}
+
+% Nivel de shell-escape informado por el motor: 0 = deshabilitado,
+% 1 = completo, 2 = restringido. CLAUDE.md exige 0 (ni siquiera restringido).
+\ifdefined\pdfshellescape
+  \ifnum\pdfshellescape=0
+    \resultado{shell-escape-nivel}{BLOQUEADO}
+  \else
+    \resultado{shell-escape-nivel}{VULNERABLE (\the\pdfshellescape)}
+  \fi
+\fi
+
+\IfFileExists{pwned-write18.txt}
+  {\resultado{write18-ejecucion}{VULNERABLE}}
+  {\resultado{write18-ejecucion}{BLOQUEADO}}
+
+\IfFileExists{passwd-robado.txt}
+  {\resultado{write18-etc-passwd}{VULNERABLE}}
+  {\resultado{write18-etc-passwd}{BLOQUEADO}}
+
+\revisarcanario
+
+% Informativo: muestra que TeX puede leer archivos del contenedor (esperado desde TL2026).
+\leerlinea{/etc/passwd}{\primeralinea}
+\ifx\primeralinea\empty
+  \informacion{lectura-etc-passwd}{no se pudo leer}
+\else
+  \informacion{lectura-etc-passwd}{LEIDO (\primeralinea)}
+\fi
+
+% 3. Ver el archivo latexmkrc de esta carpeta: si latexmk lo ejecuta, crea este archivo.
+\IfFileExists{pwned-latexmkrc.txt}
+  {\resultado{latexmkrc-perl}{VULNERABLE}}
+  {\resultado{latexmkrc-perl}{BLOQUEADO}}
+
+\typeout{LATEXWEB-SANDBOX: FIN}
+
+\end{document}

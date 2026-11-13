@@ -1,0 +1,67 @@
+# Infraestructura de desarrollo. Credenciales por defecto solo para uso local;
+# sobrescribirlas en .env (ver .env.example). Puertos ligados a 127.0.0.1.
+#
+# Solo levanta la infraestructura. Las apps corren en el host con `pnpm dev`:
+#   - apps/server:   API REST (Fastify) + colaboración (Hocuspocus) en el mismo proceso y puerto
+#   - apps/compiler: worker de la cola `compile` (Redis); compila en contenedores efímeros de la
+#                    imagen latexweb-texlive (pnpm --filter @latexweb/compiler image:build)
+#   - apps/web:      frontend (Vite)
+name: latexweb
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-latexweb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-latexweb}
+      POSTGRES_DB: ${POSTGRES_DB:-latexweb}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # BullMQ requiere que Redis no expulse claves
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # MinIO dejó de publicar imágenes oficiales (minio/minio fue retirada de Docker Hub).
+  # Usamos el fork comunitario pgsty/minio, con el mismo binario y la misma API S3, fijado a un release.
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-latexweb}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-latexweb-dev-secret}
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

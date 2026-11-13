@@ -1,0 +1,36 @@
+% Fixture: artículo mínimo con pdfLaTeX, sin archivos externos.
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath}
+\usepackage{hyperref}
+
+\title{Artículo simple}
+\author{Fixture de pruebas}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Documento de una página que usa solo paquetes estándar. Sirve como caso base:
+si este no compila, nada compila.
+\end{abstract}
+
+\section{Introducción}\label{sec:intro}
+Texto con acentos y eñes: año, pingüino, canción. Una referencia cruzada a la
+sección~\ref{sec:resultados} y a la ecuación~\eqref{eq:euler}, que requieren
+una segunda pasada de compilación.
+
+\section{Resultados}\label{sec:resultados}
+\begin{equation}\label{eq:euler}
+  e^{i\pi} + 1 = 0
+\end{equation}
+
+\begin{itemize}
+  \item Primer elemento
+  \item Segundo elemento
+\end{itemize}
+
+\end{document}

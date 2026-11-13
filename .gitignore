@@ -1,0 +1,25 @@
+node_modules/
+dist/
+coverage/
+.env
+*.log
+
+# Artefactos de compilación LaTeX en fixtures
+fixtures/latex/**/*.aux
+fixtures/latex/**/*.log
+fixtures/latex/**/*.fls
+fixtures/latex/**/*.fdb_latexmk
+fixtures/latex/**/*.bbl
+fixtures/latex/**/*.bcf
+fixtures/latex/**/*.blg
+fixtures/latex/**/*.run.xml
+fixtures/latex/**/*.out
+fixtures/latex/**/*.nav
+fixtures/latex/**/*.snm
+fixtures/latex/**/*.toc
+fixtures/latex/**/*.xdv
+fixtures/latex/**/*.pdf
+!fixtures/latex/con-imagenes/figuras/*.pdf
+# Rastros del fixture malicioso si alguna vez se compila sin sandbox
+fixtures/latex/malicioso/pwned-*.txt
+fixtures/latex/malicioso/passwd-robado.txt

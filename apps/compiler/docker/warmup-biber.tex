@@ -1,0 +1,10 @@
+% Documento de calentamiento de biber: se compila durante el build de la imagen para que PAR
+% extraiga las bibliotecas nativas que biber usa en la práctica (ver el Dockerfile).
+% biblatex-examples.bib trae todos los tipos de entrada, Unicode y casos de ordenamiento.
+\documentclass{article}
+\usepackage[backend=biber,style=authoryear]{biblatex}
+\addbibresource{biblatex-examples.bib}
+\begin{document}
+\nocite{*}
+\printbibliography
+\end{document}

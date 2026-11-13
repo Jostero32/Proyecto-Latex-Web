@@ -1,0 +1,7 @@
+# ATAQUE: latexmk ejecuta este archivo como código Perl si lo encuentra en el
+# directorio del proyecto (también .latexmkrc). Esto permite ejecutar código
+# aunque shell-escape esté deshabilitado. El worker debe correr latexmk con
+# -norc (y pasar su propia configuración con -r) para ignorarlo.
+open(my $fh, '>', 'pwned-latexmkrc.txt');
+print $fh "PWNED\n";
+close($fh);

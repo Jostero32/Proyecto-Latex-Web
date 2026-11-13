@@ -1,0 +1,19 @@
+# Texto con LF en el repositorio y en la copia de trabajo, en todas las plataformas
+# (con core.autocrlf=true, Windows convertiría a CRLF al hacer checkout).
+* text=auto eol=lf
+
+# Los scripts y el Dockerfile se ejecutan en Linux: con CRLF, /bin/sh falla dentro del contenedor.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+
+# Binarios: nunca convertir saltos de línea. Un PDF sin bytes NUL parece texto, y convertirlo
+# rompería la tabla xref (offsets en bytes).
+*.pdf  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ttf  binary
+*.otf  binary
+*.woff binary
+*.woff2 binary

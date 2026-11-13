@@ -1,0 +1,43 @@
+% !TEX program = xelatex
+% Fixture: requiere XeLaTeX (fontspec falla con pdfLaTeX).
+% Las fuentes se cargan por nombre de archivo para no depender de fontconfig.
+\documentclass[11pt,a4paper]{article}
+\usepackage{fontspec}
+\usepackage{unicode-math}
+\usepackage[spanish]{babel}
+
+\setmainfont{texgyrepagella}[
+  Extension      = .otf,
+  UprightFont    = *-regular,
+  BoldFont       = *-bold,
+  ItalicFont     = *-italic,
+  BoldItalicFont = *-bolditalic,
+]
+\setsansfont{texgyreheros}[
+  Extension      = .otf,
+  UprightFont    = *-regular,
+  BoldFont       = *-bold,
+  ItalicFont     = *-italic,
+  BoldItalicFont = *-bolditalic,
+]
+\setmonofont{lmmono10-regular.otf}
+\setmathfont{latinmodern-math.otf}
+
+\title{Fuentes OpenType con XeLaTeX}
+\author{Fixture de pruebas}
+\date{}
+
+\begin{document}
+\maketitle
+
+Texto en TeX Gyre Pagella con \textbf{negrita}, \textit{cursiva} y
+\textbf{\textit{ambas}}. Caracteres Unicode escritos directamente: ñ, ü, €, —,
+«comillas», “tipográficas” y ligaduras: fi, fl, ffi.
+
+\textsf{Texto sin serifa en TeX Gyre Heros.}
+
+\texttt{Texto monoespaciado en Latin Modern Mono.}
+
+Matemática Unicode: $α + β = γ$, $∑_{i=1}^{n} i = \frac{n(n+1)}{2}$, $x ≤ y$.
+
+\end{document}

@@ -1,0 +1,31 @@
+% Fixture: imágenes PNG (raster) y PDF (vectorial) en una subcarpeta,
+% resueltas con \graphicspath y sin extensión explícita.
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{graphicx}
+\graphicspath{{figuras/}}
+
+\title{Documento con imágenes}
+\author{Fixture de pruebas}
+\date{}
+
+\begin{document}
+\maketitle
+
+La figura~\ref{fig:raster} es un PNG y la figura~\ref{fig:vector} es un PDF.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.5\textwidth]{degradado}
+  \caption{Imagen raster (PNG).}\label{fig:raster}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.4\textwidth]{diagrama}
+  \caption{Imagen vectorial (PDF).}\label{fig:vector}
+\end{figure}
+
+\end{document}

@@ -1,0 +1,17 @@
+% Documento de calentamiento: se compila con lualatex durante el build de la imagen para dejar
+% en TEXMFSYSVAR las cachés de luaotfload de las fuentes más comunes. Sin esto, cada
+% compilación con lualatex (que arranca con /tmp vacío) tarda unos 6 s más.
+\documentclass{article}
+\usepackage{fontspec}
+\usepackage{unicode-math}
+\begin{document}
+% Latin Modern: la fuente por defecto de fontspec.
+Latin Modern \textbf{negrita} \textit{cursiva} \textbf{\textit{ambas}} \textsf{sans \textbf{b}}
+\texttt{mono} $x + \alpha = \sum_{i=1}^{n} i$
+
+% TeX Gyre: las alternativas más usadas en documentos con fontspec.
+\fontspec{TeX Gyre Pagella} Pagella \textbf{b} \textit{i} \textbf{\textit{bi}}
+\fontspec{TeX Gyre Termes} Termes \textbf{b} \textit{i} \textbf{\textit{bi}}
+\fontspec{TeX Gyre Heros} Heros \textbf{b} \textit{i} \textbf{\textit{bi}}
+\fontspec{TeX Gyre Cursor} Cursor \textbf{b}
+\end{document}
