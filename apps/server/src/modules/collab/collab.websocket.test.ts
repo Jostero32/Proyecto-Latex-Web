@@ -9,7 +9,7 @@ let app: FastifyInstance;
 let base: string;
 
 beforeEach(async () => {
-  app = buildApp();
+  app = await buildApp();
   await app.listen({ port: 0, host: '127.0.0.1' });
   base = `127.0.0.1:${(app.server.address() as AddressInfo).port}`;
 });

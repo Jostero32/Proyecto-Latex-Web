@@ -9,10 +9,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fastify/multipart": "^10.1.8",
     "@hocuspocus/server": "^4.8.0",
     "@latexweb/shared": "workspace:*",
+    "bullmq": "^6.7.5",
     "crossws": "0.4.17",
     "fastify": "^5.12.8",
+    "ioredis": "^6.0.0",
     "yjs": "^13.6.33"
   }
 }

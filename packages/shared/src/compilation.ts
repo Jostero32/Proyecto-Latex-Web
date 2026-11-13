@@ -61,6 +61,7 @@ export interface CompilationStatusResponse {
 }
 
 export type CompilationErrorCode =
+  | 'invalid_request'
   | 'invalid_path'
   | 'duplicate_path'
   | 'no_files'
@@ -75,7 +76,8 @@ export type CompilationErrorCode =
   | 'not_ready'
   | 'artifact_not_available'
   | 'pdf_too_large'
-  | 'expired';
+  | 'expired'
+  | 'internal_error';
 
 /** Nombre de la carpeta de almacenamiento por defecto dentro del directorio temporal del sistema. */
 export const DEFAULT_STORAGE_DIRNAME = 'latexweb-compilations';
