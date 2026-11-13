@@ -6,7 +6,9 @@ import type { JobSnapshot } from './compilations.queue';
 export function buildStatusResponse(id: string, job: JobSnapshot, ttlSeconds: number): CompilationStatusResponse {
   const response: CompilationStatusResponse = {
     id,
-    status: job.state === 'completed' ? (job.result?.outcome ?? 'failed') : job.state,
+    // 'completed' sin resultado legible es transitorio (el resultado todavía no se pudo leer):
+    // se informa 'running' para que el cliente siga esperando, nunca un 'failed' falso.
+    status: job.state === 'completed' ? (job.result?.outcome ?? 'running') : job.state,
     engine: job.data.engine,
     mainFile: job.data.mainFile,
     createdAt: new Date(job.createdAt).toISOString(),
@@ -46,7 +48,10 @@ export function artifactAvailability(
   ttlSeconds: number,
   now: number = Date.now(),
 ): ArtifactAvailability {
-  if (job.state === 'queued' || job.state === 'running') return { available: false, statusCode: 409, code: 'not_ready' };
+  // 'completed' sin resultado legible es transitorio: como si siguiera corriendo.
+  if (job.state === 'queued' || job.state === 'running' || (job.state === 'completed' && !job.result)) {
+    return { available: false, statusCode: 409, code: 'not_ready' };
+  }
   // Un fallo de infraestructura no deja artefactos.
   if (job.state === 'failed' || !job.result) return { available: false, statusCode: 404, code: 'artifact_not_available' };
 

@@ -24,8 +24,9 @@ export interface CompileQueue {
   close(): Promise<void>;
 }
 
-export function createBullCompileQueue(connection: Redis, ttlSeconds: number): CompileQueue {
-  const queue = new Queue<CompileJobData, CompileJobResult>(COMPILE_QUEUE, { connection });
+/** `name` solo se cambia en tests, para no compartir la cola con un worker real. */
+export function createBullCompileQueue(connection: Redis, ttlSeconds: number, name: string = COMPILE_QUEUE): CompileQueue {
+  const queue = new Queue<CompileJobData, CompileJobResult>(name, { connection });
 
   return {
     async add(data) {
@@ -42,11 +43,14 @@ export function createBullCompileQueue(connection: Redis, ttlSeconds: number): C
     },
 
     async get(id) {
-      const job = await queue.getJob(id);
-      if (!job) return null;
-      const bullState = await job.getState();
+      // Primero el estado y después el job: si el job termina entre las dos lecturas, en este
+      // orden solo se informa 'running' un instante de más. Al revés (job y después estado) se
+      // podía leer 'completed' con un job leído antes de terminar, sin returnvalue.
+      const bullState = await queue.getJobState(id);
       const state = mapState(bullState);
       if (state === null) return null;
+      const job = await queue.getJob(id);
+      if (!job) return null;
       const snapshot: JobSnapshot = { state, data: job.data, createdAt: job.timestamp };
       if (job.finishedOn !== undefined) snapshot.finishedAt = job.finishedOn;
       if (state === 'completed' && job.returnvalue) snapshot.result = job.returnvalue;

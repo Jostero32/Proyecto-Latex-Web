@@ -99,9 +99,12 @@ describe('buildStatusResponse', () => {
     expect(res).not.toHaveProperty('logUrl');
   });
 
-  it('completed sin result se trata como failed', () => {
+  // Ocurre si el job termina entre la lectura del estado y la del job: es transitorio. Informar
+  // 'failed' hacía que el cliente dejara de esperar una compilación que sí terminó (visto en la
+  // prueba de punta a punta del paso 9).
+  it('completed sin result se informa como running (transitorio), nunca como failed', () => {
     const res = buildStatusResponse(ID, noResult('completed'), TTL);
-    expect(res.status).toBe('failed');
+    expect(res.status).toBe('running');
     expect(res).not.toHaveProperty('pdfUrl');
     expect(res).not.toHaveProperty('logUrl');
   });
@@ -127,7 +130,7 @@ describe('artifactAvailability', () => {
     ['running log', pending('running'), 'log', 409, 'not_ready'],
     ['failed pdf', noResult('failed'), 'pdf', 404, 'artifact_not_available'],
     ['failed log', noResult('failed'), 'log', 404, 'artifact_not_available'],
-    ['completed sin result', noResult('completed'), 'pdf', 404, 'artifact_not_available'],
+    ['completed sin result (transitorio)', noResult('completed'), 'pdf', 409, 'not_ready'],
     ['pdf too_large', noPdf('too_large'), 'pdf', 404, 'pdf_too_large'],
     ['pdf not_produced', noPdf('not_produced'), 'pdf', 404, 'artifact_not_available'],
     ['log ausente', job({ result: result({ hasLog: false }) }), 'log', 404, 'artifact_not_available'],
