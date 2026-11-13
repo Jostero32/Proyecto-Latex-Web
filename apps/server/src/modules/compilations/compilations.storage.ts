@@ -1,7 +1,7 @@
 // Almacenamiento de las compilaciones del lado de la API, en el directorio compartido con el worker.
 // Ver docs/specs/compilacion.md, "Almacenamiento (directorio compartido)". Cuando se pase a MinIO,
 // solo cambia esta implementación.
-import { createReadStream, type ReadStream } from 'node:fs';
+import type { ReadStream } from 'node:fs';
 import { constants, lstat, mkdir, open, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
 import { ARTIFACT_FILES, isCompilationId, type ArtifactKind } from '@latexweb/shared';
@@ -65,7 +65,10 @@ export function createLocalCompilationsStorage(root: string): CompilationsStorag
           await handle.close();
           return null;
         }
-        return { stream: createReadStream('', { fd: handle.fd, autoClose: true }), size: fdStats.size };
+        // El stream del propio handle es dueño del descriptor y lo cierra al terminar. Usar
+        // createReadStream({ fd: handle.fd }) deja dos dueños: al recolectar el handle, Node intenta
+        // cerrar un fd ya cerrado y lanza EBADF como excepción no capturada (tumba el proceso).
+        return { stream: handle.createReadStream({ autoClose: true }), size: fdStats.size };
       } catch (error) {
         if (isErrno(error, 'ENOENT') || isErrno(error, 'ELOOP') || isErrno(error, 'ENOTDIR')) return null;
         throw error;

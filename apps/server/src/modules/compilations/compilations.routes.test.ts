@@ -1,12 +1,13 @@
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { CompileJobData } from '@latexweb/shared';
+import type { CompileJobData, CompileJobResult } from '@latexweb/shared';
 import { buildApp } from '../../app';
 import type { CompilationsConfig } from '../../config';
-import type { CompileQueue } from './compilations.queue';
+import type { CompileQueue, JobSnapshot } from './compilations.queue';
 import { createLocalCompilationsStorage } from './compilations.storage';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -17,6 +18,9 @@ interface FakeQueue extends CompileQueue {
   waiting: number;
   failWaitingCount: boolean;
   failAdd: boolean;
+  jobs: Map<string, JobSnapshot>;
+  getCalls: number;
+  failGet: Error | null;
 }
 
 function createFakeQueue(): FakeQueue {
@@ -25,6 +29,9 @@ function createFakeQueue(): FakeQueue {
     waiting: 0,
     failWaitingCount: false,
     failAdd: false,
+    jobs: new Map(),
+    getCalls: 0,
+    failGet: null,
     async add(data) {
       if (queue.failAdd) throw new Error('redis caído');
       queue.added.push(data);
@@ -33,8 +40,10 @@ function createFakeQueue(): FakeQueue {
       if (queue.failWaitingCount) throw new Error('redis caído');
       return queue.waiting;
     },
-    async get() {
-      return null;
+    async get(id) {
+      queue.getCalls++;
+      if (queue.failGet) throw queue.failGet;
+      return queue.jobs.get(id) ?? null;
     },
     async close() {},
   };
@@ -297,5 +306,260 @@ describe('POST /compilations: cola', () => {
     const res = await upload([{ name: 'main.tex' }]);
     expect(res.statusCode).toBe(202);
     expect(await exists(join(root, res.json<{ id: string }>().id))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /compilations/:id, /pdf y /log
+// ---------------------------------------------------------------------------
+
+const ID = '3b241101-e2bb-4255-8caf-4136c566a962';
+
+const okResult = (over: Partial<CompileJobResult> = {}): CompileJobResult => ({
+  outcome: 'success',
+  exitCode: 0,
+  durationMs: 1234,
+  hasPdf: true,
+  hasLog: true,
+  pdfMissingReason: null,
+  ...over,
+});
+
+function setJob(over: Partial<JobSnapshot> = {}): JobSnapshot {
+  const snapshot: JobSnapshot = {
+    state: 'completed',
+    data: { compilationId: ID, mainFile: 'main.tex', engine: 'pdflatex' },
+    createdAt: Date.now() - 5000,
+    finishedAt: Date.now() - 1000,
+    result: okResult(),
+    ...over,
+  };
+  queue.jobs.set(ID, snapshot);
+  return snapshot;
+}
+
+function setPending(state: 'queued' | 'running'): void {
+  queue.jobs.set(ID, {
+    state,
+    data: { compilationId: ID, mainFile: 'main.tex', engine: 'pdflatex' },
+    createdAt: Date.now() - 1000,
+  });
+}
+
+async function writeArtifact(name: 'output.pdf' | 'output.log', content: string | Uint8Array): Promise<void> {
+  await mkdir(join(root, ID), { recursive: true });
+  await writeFile(join(root, ID, name), content);
+}
+
+const get = (url: string) => app.inject({ method: 'GET', url });
+
+describe('GET /compilations/:id', () => {
+  it.each(['no-es-uuid', ID.toUpperCase()])(
+    'id inválido %s: 404 not_found sin consultar la cola',
+    async (bad) => {
+      for (const suffix of ['', '/pdf', '/log']) {
+        const res = await get(`/compilations/${bad}${suffix}`);
+        expect(res.statusCode).toBe(404);
+        expectErrorShape(res.json(), 'not_found');
+      }
+      expect(queue.getCalls).toBe(0);
+    },
+  );
+
+  // La URL se normaliza antes del router (`/compilations/..` pasa a `/`), así que ni siquiera llega
+  // al handler: responde el 404 genérico de Fastify. Lo que importa es que no llegue a la cola.
+  it.each(['..', '%2e%2e', '..%2f..%2fetc', '%2e%2e%5c'])('id %s: 404 sin consultar la cola', async (bad) => {
+    for (const suffix of ['', '/pdf', '/log']) {
+      const res = await get(`/compilations/${bad}${suffix}`);
+      expect(res.statusCode).toBe(404);
+    }
+    expect(queue.getCalls).toBe(0);
+  });
+
+  it('id inexistente: 404 not_found', async () => {
+    const res = await get(`/compilations/${ID}`);
+    expect(res.statusCode).toBe(404);
+    expectErrorShape(res.json(), 'not_found');
+    expect(queue.getCalls).toBe(1);
+  });
+
+  it('queued: 200 con la forma de CompilationStatusResponse', async () => {
+    setPending('queued');
+    const res = await get(`/compilations/${ID}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      id: ID,
+      status: 'queued',
+      engine: 'pdflatex',
+      mainFile: 'main.tex',
+      createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/),
+    });
+  });
+
+  it('completed: 200 con pdfUrl y logUrl', async () => {
+    setJob();
+    const res = await get(`/compilations/${ID}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      id: ID,
+      status: 'success',
+      durationMs: 1234,
+      exitCode: 0,
+      pdfMissingReason: null,
+      pdfUrl: `/compilations/${ID}/pdf`,
+      logUrl: `/compilations/${ID}/log`,
+      finishedAt: expect.any(String),
+      expiresAt: expect.any(String),
+    });
+  });
+
+  it('si queue.get lanza: 500 internal_error sin el mensaje interno', async () => {
+    queue.failGet = new Error(`ECONNREFUSED 10.0.0.5:6379 ${root}`);
+    for (const suffix of ['', '/pdf', '/log']) {
+      const res = await get(`/compilations/${ID}${suffix}`);
+      expect(res.statusCode).toBe(500);
+      expectErrorShape(res.json(), 'internal_error');
+      expect(res.body).not.toContain('ECONNREFUSED');
+      expect(res.body).not.toContain('6379');
+    }
+  });
+});
+
+describe('GET /compilations/:id/pdf', () => {
+  it('200 con el contenido exacto y las cabeceras de seguridad', async () => {
+    const content = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x00, 0xff, 0xfe, 0x0a, 0x3c, 0x73, 0x63, 0x72]);
+    await writeArtifact('output.pdf', content);
+    setJob();
+    const res = await get(`/compilations/${ID}/pdf`);
+    expect(res.statusCode).toBe(200);
+    expect(Buffer.compare(res.rawPayload, content)).toBe(0);
+    expect(res.headers['content-type']).toBe('application/pdf');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['content-security-policy']).toBe('sandbox');
+    expect(res.headers['content-disposition']).toBe('inline; filename="output.pdf"');
+    expect(res.headers['content-length']).toBe(String(content.length));
+  });
+
+  it.each(['queued', 'running'] as const)('%s: 409 not_ready', async (state) => {
+    setPending(state);
+    const res = await get(`/compilations/${ID}/pdf`);
+    expect(res.statusCode).toBe(409);
+    expectErrorShape(res.json(), 'not_ready');
+  });
+
+  it('too_large: 404 pdf_too_large con el límite en el mensaje', async () => {
+    setJob({ result: okResult({ outcome: 'error', hasPdf: false, pdfMissingReason: 'too_large' }) });
+    const res = await get(`/compilations/${ID}/pdf`);
+    expect(res.statusCode).toBe(404);
+    expectErrorShape(res.json(), 'pdf_too_large');
+    expect(res.json<{ message: string }>().message).toContain(String(50 * MB));
+  });
+
+  it('not_produced: 404 artifact_not_available', async () => {
+    setJob({ result: okResult({ outcome: 'error', hasPdf: false, pdfMissingReason: 'not_produced' }) });
+    const res = await get(`/compilations/${ID}/pdf`);
+    expect(res.statusCode).toBe(404);
+    expectErrorShape(res.json(), 'artifact_not_available');
+  });
+
+  it('failed: 404 artifact_not_available', async () => {
+    setJob({ state: 'failed', result: undefined });
+    const res = await get(`/compilations/${ID}/pdf`);
+    expect(res.statusCode).toBe(404);
+    expectErrorShape(res.json(), 'artifact_not_available');
+  });
+
+  it('TTL vencido: 410 expired aunque el archivo exista', async () => {
+    await writeArtifact('output.pdf', '%PDF-1.5');
+    setJob({ finishedAt: Date.now() - 3600 * 1000 - 5000 });
+    const res = await get(`/compilations/${ID}/pdf`);
+    expect(res.statusCode).toBe(410);
+    expectErrorShape(res.json(), 'expired');
+  });
+
+  it('job completo pero archivo borrado: 410 expired', async () => {
+    setJob();
+    const res = await get(`/compilations/${ID}/pdf`);
+    expect(res.statusCode).toBe(410);
+    expectErrorShape(res.json(), 'expired');
+  });
+
+  it('id inexistente: 404 not_found', async () => {
+    const res = await get(`/compilations/${ID}/pdf`);
+    expect(res.statusCode).toBe(404);
+    expectErrorShape(res.json(), 'not_found');
+  });
+});
+
+describe('GET /compilations/:id/log', () => {
+  it('200 text/plain utf-8 con nosniff y el contenido', async () => {
+    const content = 'This is pdfTeX\n! Undefined control sequence. ñ <script>alert(1)</script>\n';
+    await writeArtifact('output.log', content);
+    setJob();
+    const res = await get(`/compilations/${ID}/log`);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/plain; charset=utf-8');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['content-security-policy']).toBe('sandbox');
+    expect(res.headers['content-disposition']).toBe('inline; filename="output.log"');
+    expect(res.headers['content-length']).toBe(String(Buffer.byteLength(content)));
+    expect(res.body).toBe(content);
+  });
+
+  it('archivo borrado: 410 expired', async () => {
+    setJob();
+    const res = await get(`/compilations/${ID}/log`);
+    expect(res.statusCode).toBe(410);
+    expectErrorShape(res.json(), 'expired');
+  });
+
+  it('log con bytes que no son UTF-8 se sirve igual', async () => {
+    const content = Buffer.from([0x21, 0x20, 0xe9, 0xff, 0xfe, 0x80, 0x0a]);
+    await writeArtifact('output.log', content);
+    setJob();
+    const res = await get(`/compilations/${ID}/log`);
+    expect(res.statusCode).toBe(200);
+    expect(Buffer.compare(res.rawPayload, content)).toBe(0);
+  });
+
+  it('hasLog false: 404 artifact_not_available', async () => {
+    setJob({ result: okResult({ outcome: 'error', hasLog: false }) });
+    const res = await get(`/compilations/${ID}/log`);
+    expect(res.statusCode).toBe(404);
+    expectErrorShape(res.json(), 'artifact_not_available');
+  });
+});
+
+describe('GET artefactos: seguridad', () => {
+  it('output.pdf es un directorio: no es 200 (410)', async () => {
+    await mkdir(join(root, ID, 'output.pdf'), { recursive: true });
+    setJob();
+    const res = await get(`/compilations/${ID}/pdf`);
+    expect(res.statusCode).toBe(410);
+    expectErrorShape(res.json(), 'expired');
+  });
+
+  const canSymlink = (() => {
+    const dir = mkdtempSync(join(tmpdir(), 'latexweb-symlink-probe-'));
+    try {
+      writeFileSync(join(dir, 'a'), 'x');
+      symlinkSync(join(dir, 'a'), join(dir, 'b'), 'file');
+      return true;
+    } catch {
+      return false;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  })();
+
+  it.skipIf(!canSymlink)('output.pdf es un symlink a un archivo externo: no se sirve (410)', async () => {
+    const secret = join(root, 'secreto.txt');
+    await writeFile(secret, 'contenido-secreto');
+    await mkdir(join(root, ID), { recursive: true });
+    await symlink(secret, join(root, ID, 'output.pdf'), 'file');
+    setJob();
+    const res = await get(`/compilations/${ID}/pdf`);
+    expect(res.statusCode).toBe(410);
+    expect(res.body).not.toContain('contenido-secreto');
   });
 });

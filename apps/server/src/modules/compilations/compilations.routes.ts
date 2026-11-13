@@ -1,10 +1,16 @@
 // Rutas /compilations. Ver docs/specs/compilacion.md, "Endpoints".
 import { randomUUID } from 'node:crypto';
 import type { FastifyError, FastifyInstance } from 'fastify';
-import type { CompilationErrorCode, CreateCompilationResponse } from '@latexweb/shared';
+import {
+  isCompilationId,
+  type ArtifactKind,
+  type CompilationErrorCode,
+  type CreateCompilationResponse,
+} from '@latexweb/shared';
 import type { CompilationsConfig } from '../../config';
 import { sendError } from '../../lib/http-error';
 import type { CompileQueue } from './compilations.queue';
+import { artifactAvailability, buildStatusResponse, type ArtifactErrorCode } from './compilations.status';
 import type { CompilationsStorage } from './compilations.storage';
 import { readUpload, UploadError, validateUpload } from './compilations.upload';
 
@@ -81,4 +87,48 @@ export async function compilationsRoutes(app: FastifyInstance, deps: Compilation
     };
     return reply.code(202).header('Location', `/compilations/${id}`).send(body);
   });
+
+  app.get<{ Params: { id: string } }>('/compilations/:id', async (request, reply) => {
+    const { id } = request.params;
+    // El id se valida antes de tocar Redis o el disco.
+    if (!isCompilationId(id)) return fail(reply, 404, 'not_found', 'No existe la compilación');
+    const job = await queue.get(id);
+    if (!job) return fail(reply, 404, 'not_found', 'No existe la compilación');
+    return reply.header('Cache-Control', 'no-store').send(buildStatusResponse(id, job, config.ttlSeconds));
+  });
+
+  for (const kind of ['pdf', 'log'] as const satisfies readonly ArtifactKind[]) {
+    app.get<{ Params: { id: string } }>(`/compilations/:id/${kind}`, async (request, reply) => {
+      const { id } = request.params;
+      if (!isCompilationId(id)) return fail(reply, 404, 'not_found', 'No existe la compilación');
+      const job = await queue.get(id);
+      if (!job) return fail(reply, 404, 'not_found', 'No existe la compilación');
+
+      const availability = artifactAvailability(job, kind, config.ttlSeconds);
+      if (!availability.available) {
+        return fail(reply, availability.statusCode, availability.code, ARTIFACT_MESSAGES[availability.code](config));
+      }
+
+      const artifact = await storage.openArtifact(id, kind);
+      // El job existe pero el archivo ya no: lo borró el barrido al vencer el TTL.
+      if (!artifact) return fail(reply, 410, 'expired', ARTIFACT_MESSAGES.expired(config));
+
+      // Contenido generado por el usuario: nunca se interpreta como HTML ni ejecuta scripts.
+      return reply
+        .header('Content-Type', kind === 'pdf' ? 'application/pdf' : 'text/plain; charset=utf-8')
+        .header('Content-Length', String(artifact.size))
+        .header('Content-Disposition', `inline; filename="output.${kind}"`)
+        .header('X-Content-Type-Options', 'nosniff')
+        .header('Content-Security-Policy', 'sandbox')
+        .header('Cache-Control', 'private, no-store')
+        .send(artifact.stream);
+    });
+  }
 }
+
+const ARTIFACT_MESSAGES: Record<ArtifactErrorCode, (config: CompilationsConfig) => string> = {
+  not_ready: () => 'La compilación todavía no terminó',
+  artifact_not_available: () => 'La compilación no generó este archivo',
+  pdf_too_large: (config) => `El PDF superó el tamaño máximo de ${config.maxPdfBytes} bytes y no se guardó`,
+  expired: () => 'El archivo ya no está disponible: venció el tiempo de retención',
+};
