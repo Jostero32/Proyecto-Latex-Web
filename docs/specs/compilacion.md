@@ -7,8 +7,8 @@ proyectos persistentes y MinIO.
 
 ## 2. Alcance
 **Incluye**
-- `POST /compile`: subida multipart de los archivos del proyecto. Devuelve 202 con un id.
-- `GET /compile/:id` (estado), `GET /compile/:id/pdf` y `GET /compile/:id/log`.
+- `POST /compilations`: subida multipart de los archivos del proyecto. Devuelve 202 con un id.
+- `GET /compilations/:id` (estado), `GET /compilations/:id/pdf` y `GET /compilations/:id/log`.
 - Validación de rutas, límites de tamaño y cantidad, documento principal y motor
   (pdflatex, xelatex, lualatex; se acepta el comentario mágico `% !TEX program`).
 - Worker BullMQ que compila con latexmk en un contenedor Docker aislado: sin red, con límites de CPU, RAM,
@@ -156,6 +156,14 @@ run --rm --name latexweb-compile-<id> --label latexweb.compile=<id> --init
   - `error`: cualquier otro caso. Si hay PDF parcial, se sirve igual.
   - Solo se lanza excepción ante fallos de infraestructura (códigos 125-127 de docker, I/O, payload
     inválido). Esos jobs quedan en `failed` y la API no expone el mensaje interno.
+- **Motivo de la falta de PDF:** el resultado guarda `pdfMissingReason`:
+  - `null` si se publicó un PDF;
+  - `'not_produced'` si la compilación no generó PDF;
+  - `'too_large'` si lo generó pero superaba `COMPILE_MAX_PDF_BYTES` y no se publicó.
+
+  Un PDF demasiado grande cuenta como `error` aunque latexmk haya terminado con 0, porque no hay PDF
+  utilizable. `publishArtifacts` informa los dos casos por separado (`hasPdf` y `pdfTooLarge`) y la API
+  expone el motivo en el estado y como código de error en la descarga.
 - Correspondencia de estados:
 
   | Estado de BullMQ | Estado expuesto |
@@ -182,16 +190,17 @@ escuchando en `127.0.0.1`.
 |---|---|
 | `POST /compilations` (multipart) | 202 con `Location` y `CreateCompilationResponse`. 400 por ruta inválida, duplicado, sin archivos, principal ausente o inválido, o motor inválido. 413 por tamaño o cantidad. 415 si no es multipart. 503 con `Retry-After` si la espera supera `COMPILE_MAX_QUEUED` (50) o Redis falla; en ese caso se borran los archivos ya guardados. |
 | `GET /compilations/:id` | 200 con `CompilationStatusResponse`. 404 si el id no es un uuid (se comprueba antes de tocar el disco o Redis) o si no existe. |
-| `GET /compilations/:id/pdf` | 200 `application/pdf` en streaming, con `Content-Disposition: inline`, `X-Content-Type-Options: nosniff` y `Content-Security-Policy: sandbox`. 404 si no existe o no hay PDF (`artifact_not_available`). 409 si todavía no terminó. 410 si expiró. |
+| `GET /compilations/:id/pdf` | 200 `application/pdf` en streaming, con `Content-Disposition: inline`, `X-Content-Type-Options: nosniff` y `Content-Security-Policy: sandbox`. 404 si no existe la compilación (`not_found`), si no generó PDF (`artifact_not_available`) o si el PDF superó `COMPILE_MAX_PDF_BYTES` (`pdf_too_large`, con el límite en el mensaje). 409 si todavía no terminó. 410 si expiró. |
 | `GET /compilations/:id/log` | Los mismos códigos. Se sirve como `text/plain; charset=utf-8` con `nosniff`. |
 
 Los errores tienen la forma `{ error: CompilationErrorCode, message }`.
 
 ### Tipos compartidos (`packages/shared/src/compilation.ts`, TS puro, sin tipos de Node)
 `ENGINES` / `Engine`, `ARTIFACT_FILES` / `ArtifactKind`, `CompileJobData`, `CompileOutcome`,
-`CompileJobResult` (`outcome`, `exitCode`, `durationMs`, `hasPdf`, `hasLog`), `CompilationStatus`,
-`CreateCompilationResponse`, `CompilationStatusResponse` (con `createdAt`, `finishedAt`, `expiresAt`,
-`durationMs`, `exitCode`, `pdfUrl` y `logUrl`), `CompilationErrorCode` y `ApiError`.
+`CompileJobResult` (`outcome`, `exitCode`, `durationMs`, `hasPdf`, `hasLog`, `pdfMissingReason`),
+`PdfMissingReason` (`'not_produced' | 'too_large'`), `CompilationStatus`, `CreateCompilationResponse`,
+`CompilationStatusResponse` (con `createdAt`, `finishedAt`, `expiresAt`, `durationMs`, `exitCode`,
+`pdfMissingReason`, `pdfUrl` y `logUrl`), `CompilationErrorCode` (incluye `pdf_too_large`) y `ApiError`.
 
 ### Dependencias
 - **Nueva:** `@fastify/multipart` en `apps/server`. Es el plugin oficial de Fastify para multipart, trae
@@ -225,7 +234,8 @@ Los errores tienen la forma `{ error: CompilationErrorCode, message }`.
   `apps/server/src/index.ts` (crea la `Queue`) y `apps/server/package.json` (dependencias).
 - `.env.example`: `COMPILE_STORAGE_DIR`, `COMPILE_IMAGE`, `COMPILE_TIMEOUT_SECONDS=60`,
   `COMPILE_MEMORY=1g`, `COMPILE_CPUS=1`, `COMPILE_CONCURRENCY=2`, `COMPILE_TTL_SECONDS=3600`,
-  `COMPILE_MAX_QUEUED=50` y los límites de subida.
+  `COMPILE_MAX_QUEUED=50`, `COMPILE_MAX_PDF_BYTES` (50 MB), `COMPILE_MAX_LOG_BYTES` (5 MB) y los
+  límites de subida.
 
 ## 5. Pasos
 Al terminar cada paso se corren `pnpm test`, `pnpm typecheck` y `pnpm lint`.
@@ -278,6 +288,8 @@ Al terminar cada paso se corren `pnpm test`, `pnpm typecheck` y `pnpm lint`.
 - [ ] Un documento con bucle infinito termina en `timeout` dentro de `COMPILE_TIMEOUT_SECONDS + 20 s`, con
       el log disponible y sin contenedor vivo en `docker ps`.
 - [ ] Un documento con errores de LaTeX termina en `error` (no en `failed`) y su log se puede descargar.
+- [ ] Un PDF que supera `COMPILE_MAX_PDF_BYTES` deja el estado en `error` con
+      `pdfMissingReason: 'too_large'`, y `GET /compilations/:id/pdf` responde 404 `pdf_too_large`.
 - [ ] Un id inexistente o mal formado → 404. Una descarga antes de terminar → 409. Una descarga después
       del TTL → 410.
 - [ ] El PDF se sirve con `nosniff` y `CSP: sandbox`, y el log como `text/plain`.
