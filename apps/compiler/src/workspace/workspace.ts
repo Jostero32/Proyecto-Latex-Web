@@ -20,6 +20,8 @@ export interface WorkspacePaths {
 
 export interface PublishResult {
   hasPdf: boolean;
+  /** La compilación generó un PDF regular pero superaba maxPdfBytes y no se publicó. */
+  pdfTooLarge: boolean;
   hasLog: boolean;
   /** El log superó el máximo y se publicó solo su final. */
   logTruncated: boolean;
@@ -103,7 +105,10 @@ export function createLocalWorkspace(options: LocalWorkspaceOptions): Workspace 
       const dir = jobDir(id);
       const outputDir = join(dir, OUTPUT_DIR);
 
-      const hasPdf = await publishIfSafe(join(outputDir, ARTIFACT_FILES.pdf), join(dir, ARTIFACT_FILES.pdf), maxPdfBytes);
+      const pdfSource = join(outputDir, ARTIFACT_FILES.pdf);
+      const hasPdf = await publishIfSafe(pdfSource, join(dir, ARTIFACT_FILES.pdf), maxPdfBytes);
+      // Si no se publicó, distinguir "no hay PDF (o no es un archivo regular)" de "demasiado grande".
+      const pdfTooLarge = !hasPdf && ((await regularFileStats(pdfSource))?.size ?? 0) > maxPdfBytes;
 
       const logSource = join(outputDir, ARTIFACT_FILES.log);
       const logTarget = join(dir, ARTIFACT_FILES.log);
@@ -114,7 +119,7 @@ export function createLocalWorkspace(options: LocalWorkspaceOptions): Workspace 
         hasLog = logTruncated;
       }
 
-      return { hasPdf, hasLog, logTruncated };
+      return { hasPdf, pdfTooLarge, hasLog, logTruncated };
     },
 
     async cleanupWork(id) {

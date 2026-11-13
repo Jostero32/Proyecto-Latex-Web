@@ -214,7 +214,7 @@ describe('publishArtifacts', () => {
 
     const result = await make().publishArtifacts(ID);
 
-    expect(result).toEqual({ hasPdf: true, hasLog: true, logTruncated: false });
+    expect(result).toEqual({ hasPdf: true, pdfTooLarge: false, hasLog: true, logTruncated: false });
     expect(await fs.readFile(path.join(dir, 'output.pdf'))).toEqual(pdf);
     expect(await fs.readFile(path.join(dir, 'output.log'), 'utf8')).toBe('log ok');
     expect(await exists(path.join(out, 'output.pdf'))).toBe(false);
@@ -224,12 +224,12 @@ describe('publishArtifacts', () => {
   it('sin archivos devuelve todo en false', async () => {
     const { out } = await setupJob();
     await fs.mkdir(out);
-    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, hasLog: false, logTruncated: false });
+    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, pdfTooLarge: false, hasLog: false, logTruncated: false });
   });
 
   it('sin out/ tampoco falla', async () => {
     await setupJob();
-    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, hasLog: false, logTruncated: false });
+    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, pdfTooLarge: false, hasLog: false, logTruncated: false });
   });
 
   it('solo log: hasPdf false y hasLog true', async () => {
@@ -237,7 +237,7 @@ describe('publishArtifacts', () => {
     await fs.mkdir(out);
     await fs.writeFile(path.join(out, 'output.log'), '! Undefined control sequence.');
 
-    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, hasLog: true, logTruncated: false });
+    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, pdfTooLarge: false, hasLog: true, logTruncated: false });
     expect(await exists(path.join(dir, 'output.pdf'))).toBe(false);
     expect(await fs.readFile(path.join(dir, 'output.log'), 'utf8')).toBe('! Undefined control sequence.');
   });
@@ -249,6 +249,7 @@ describe('publishArtifacts', () => {
 
     const result = await make().publishArtifacts(ID);
     expect(result.hasPdf).toBe(false);
+    expect(result.pdfTooLarge).toBe(true);
     expect(await exists(path.join(dir, 'output.pdf'))).toBe(false);
   });
 
@@ -259,6 +260,7 @@ describe('publishArtifacts', () => {
 
     const result = await make().publishArtifacts(ID);
     expect(result.hasPdf).toBe(true);
+    expect(result.pdfTooLarge).toBe(false);
     expect((await fs.stat(path.join(dir, 'output.pdf'))).size).toBe(MAX_PDF);
   });
 
@@ -268,7 +270,7 @@ describe('publishArtifacts', () => {
     const log = 'a'.repeat(MAX_LOG);
     await fs.writeFile(path.join(out, 'output.log'), log);
 
-    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, hasLog: true, logTruncated: false });
+    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, pdfTooLarge: false, hasLog: true, logTruncated: false });
     expect(await fs.readFile(path.join(dir, 'output.log'), 'utf8')).toBe(log);
   });
 
@@ -279,7 +281,7 @@ describe('publishArtifacts', () => {
     await fs.writeFile(path.join(out, 'output.log'), original);
 
     const result = await make().publishArtifacts(ID);
-    expect(result).toEqual({ hasPdf: false, hasLog: true, logTruncated: true });
+    expect(result).toEqual({ hasPdf: false, pdfTooLarge: false, hasLog: true, logTruncated: true });
 
     const published = await fs.readFile(path.join(dir, 'output.log'));
     const notice = `[latexweb] El log original tenía ${MAX_LOG + 1} bytes; se muestran los últimos ${MAX_LOG}.`;
@@ -307,7 +309,7 @@ describe('publishArtifacts', () => {
     await fs.mkdir(path.join(out, 'output.pdf'), { recursive: true });
     await fs.mkdir(path.join(out, 'output.log'), { recursive: true });
 
-    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, hasLog: false, logTruncated: false });
+    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, pdfTooLarge: false, hasLog: false, logTruncated: false });
     expect(await exists(path.join(dir, 'output.pdf'))).toBe(false);
     expect(await exists(path.join(dir, 'output.log'))).toBe(false);
   });
@@ -322,7 +324,7 @@ describe('publishArtifacts', () => {
     await fs.symlink(secretPdf, path.join(out, 'output.pdf'), 'file');
     await fs.symlink(secretLog, path.join(out, 'output.log'), 'file');
 
-    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, hasLog: false, logTruncated: false });
+    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, pdfTooLarge: false, hasLog: false, logTruncated: false });
     expect(await exists(path.join(dir, 'output.pdf'))).toBe(false);
     expect(await exists(path.join(dir, 'output.log'))).toBe(false);
     expect(await fs.readFile(secretPdf, 'utf8')).toBe('SECRET-PDF');
@@ -336,7 +338,7 @@ describe('publishArtifacts', () => {
     await fs.writeFile(secretLog, 'S'.repeat(MAX_LOG * 4));
     await fs.symlink(secretLog, path.join(out, 'output.log'), 'file');
 
-    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, hasLog: false, logTruncated: false });
+    expect(await make().publishArtifacts(ID)).toEqual({ hasPdf: false, pdfTooLarge: false, hasLog: false, logTruncated: false });
     expect(await exists(path.join(dir, 'output.log'))).toBe(false);
   });
 });

@@ -20,6 +20,9 @@ export interface CompileJobData {
 
 export type CompileOutcome = 'success' | 'error' | 'timeout';
 
+/** Por qué no hay PDF: la compilación no lo generó, o lo generó pero superaba el tamaño máximo. */
+export type PdfMissingReason = 'not_produced' | 'too_large';
+
 /** Lo que devuelve el processor. Un error de LaTeX es un resultado, no una excepción. */
 export interface CompileJobResult {
   outcome: CompileOutcome;
@@ -27,6 +30,8 @@ export interface CompileJobResult {
   durationMs: number;
   hasPdf: boolean;
   hasLog: boolean;
+  /** null si se publicó un PDF. */
+  pdfMissingReason: PdfMissingReason | null;
 }
 
 /** `failed` = fallo de infraestructura (no de LaTeX). */
@@ -50,6 +55,7 @@ export interface CompilationStatusResponse {
   expiresAt?: string;
   durationMs?: number;
   exitCode?: number | null;
+  pdfMissingReason?: PdfMissingReason | null;
   pdfUrl?: string;
   logUrl?: string;
 }
@@ -68,7 +74,11 @@ export type CompilationErrorCode =
   | 'not_found'
   | 'not_ready'
   | 'artifact_not_available'
+  | 'pdf_too_large'
   | 'expired';
+
+/** Nombre de la carpeta de almacenamiento por defecto dentro del directorio temporal del sistema. */
+export const DEFAULT_STORAGE_DIRNAME = 'latexweb-compilations';
 
 export interface ApiError {
   error: CompilationErrorCode;
