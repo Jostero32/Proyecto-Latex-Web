@@ -272,32 +272,32 @@ Al terminar cada paso se corren `pnpm test`, `pnpm typecheck` y `pnpm lint`.
    `xelatex-fuentes`, consultar el estado y descargar el PDF y el log. Actualizar `.env.example`.
 
 ## 6. Criterios de aceptación
-- [ ] `POST /compilations` con los archivos de cada fixture devuelve 202 y un uuid. Al consultar el estado
+- [x] `POST /compilations` con los archivos de cada fixture devuelve 202 y un uuid. Al consultar el estado
       llega a `success` y se descarga un PDF que empieza con `%PDF`.
-- [ ] `xelatex-fuentes` se compila con XeLaTeX sin enviar `engine`, solo por el comentario mágico.
-- [ ] `con-bibliografia` ejecuta biber, y en el log no aparecen `Citation … undefined` ni
+- [x] `xelatex-fuentes` se compila con XeLaTeX sin enviar `engine`, solo por el comentario mágico.
+- [x] `con-bibliografia` ejecuta biber, y en el log no aparecen `Citation … undefined` ni
       `Please (re)run Biber`.
-- [ ] El log de `beamer` contiene `Output written on output.pdf (5 pages`.
-- [ ] El log de `malicioso` contiene `LATEXWEB-SANDBOX: FIN`, las 5 claves de intento
+- [x] El log de `beamer` contiene `Output written on output.pdf (5 pages`.
+- [x] El log de `malicioso` contiene `LATEXWEB-SANDBOX: FIN`, las 5 claves de intento
       (`shell-escape-nivel`, `write18-ejecucion`, `write18-etc-passwd`, `canario-entorno` y
       `latexmkrc-perl`) con `=BLOQUEADO` y ninguna línea `=VULNERABLE`. Este test se corre **sin** filtrar
       `latexmkrc`, para probar `-norc`, y con `LATEXWEB_CANARY` definida en el entorno del worker.
-- [ ] Rutas con `../`, absolutas, con `\` o con `C:` → 400. `latexmkrc` y `.latexmkrc` aparecen en
+- [x] Rutas con `../`, absolutas, con `\` o con `C:` → 400. `latexmkrc` y `.latexmkrc` aparecen en
       `ignoredFiles` y no se escriben en el disco.
-- [ ] Al superar un límite de tamaño o cantidad → 413. Sin `main.tex` → 400 `main_file_missing`.
-- [ ] Un documento con bucle infinito termina en `timeout` dentro de `COMPILE_TIMEOUT_SECONDS + 20 s`, con
+- [x] Al superar un límite de tamaño o cantidad → 413. Sin `main.tex` → 400 `main_file_missing`.
+- [x] Un documento con bucle infinito termina en `timeout` dentro de `COMPILE_TIMEOUT_SECONDS + 20 s`, con
       el log disponible y sin contenedor vivo en `docker ps`.
-- [ ] Un documento con errores de LaTeX termina en `error` (no en `failed`) y su log se puede descargar.
-- [ ] Un PDF que supera `COMPILE_MAX_PDF_BYTES` deja el estado en `error` con
+- [x] Un documento con errores de LaTeX termina en `error` (no en `failed`) y su log se puede descargar.
+- [x] Un PDF que supera `COMPILE_MAX_PDF_BYTES` deja el estado en `error` con
       `pdfMissingReason: 'too_large'`, y `GET /compilations/:id/pdf` responde 404 `pdf_too_large`.
-- [ ] Un id inexistente o mal formado → 404. Una descarga antes de terminar → 409. Una descarga después
+- [x] Un id inexistente o mal formado → 404. Una descarga antes de terminar → 409. Una descarga después
       del TTL → 410.
-- [ ] El PDF se sirve con `nosniff` y `CSP: sandbox`, y el log como `text/plain`.
-- [ ] Los argumentos de `docker run` incluyen `--network none`, límites de CPU, memoria y PIDs, `--read-only`
+- [x] El PDF se sirve con `nosniff` y `CSP: sandbox`, y el log como `text/plain`.
+- [x] Los argumentos de `docker run` incluyen `--network none`, límites de CPU, memoria y PIDs, `--read-only`
       y `--cap-drop ALL`, no aparece ninguna opción que habilite shell-escape, solo hay dos montajes
       (`/in` y `/out`) y solo variables de entorno de la lista blanca con valor explícito.
-- [ ] Sin Docker, los tests de integración se saltan. Con `LATEXWEB_REQUIRE_DOCKER=1` fallan.
-- [ ] `pnpm test`, `pnpm typecheck` y `pnpm lint` pasan.
+- [x] Sin Docker, los tests de integración se saltan. Con `LATEXWEB_REQUIRE_DOCKER=1` fallan.
+- [x] `pnpm test`, `pnpm typecheck` y `pnpm lint` pasan.
 
 ## 7. Riesgos
 **Seguridad**
