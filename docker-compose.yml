@@ -1,11 +1,14 @@
-# Infraestructura de desarrollo. Credenciales por defecto solo para uso local;
-# sobrescribirlas en .env (ver .env.example). Puertos ligados a 127.0.0.1.
+# Credenciales por defecto solo para uso local; sobrescribirlas en .env (ver .env.example).
+# Puertos ligados a 127.0.0.1. Ver docs/specs/docker-compose.md.
 #
-# Solo levanta la infraestructura. Las apps corren en el host con `pnpm dev`:
-#   - apps/server:   API REST (Fastify) + colaboración (Hocuspocus) en el mismo proceso y puerto
-#   - apps/compiler: worker de la cola `compile` (Redis); compila en contenedores efímeros de la
-#                    imagen latexweb-texlive (pnpm --filter @latexweb/compiler image:build)
-#   - apps/web:      frontend (Vite)
+#   docker compose up -d
+#       Solo la infraestructura (postgres, redis, minio). Las apps corren en el host con `pnpm dev`.
+#
+#   docker compose --profile apps up -d --build
+#       Todo: además construye la imagen de TeX Live y levanta server (API + colaboración, :3000),
+#       compiler (worker de la cola `compile`) y web (:5173).
+#       ATENCIÓN: el servicio compiler monta el socket de Docker del host, lo que equivale a root
+#       sobre el host. Es para uso local; no para producción.
 name: latexweb
 
 services:
@@ -61,7 +64,94 @@ services:
       timeout: 5s
       retries: 10
 
+  # --- Apps (perfil `apps`) ---------------------------------------------------------------
+
+  # Solo construye la imagen de las compilaciones y termina; compiler espera a que termine bien.
+  texlive-image:
+    profiles: [apps]
+    build: ./apps/compiler/docker
+    image: latexweb-texlive:tl2026-1
+    entrypoint: ["true"]
+    restart: "no"
+
+  server:
+    profiles: [apps]
+    build:
+      context: .
+      target: server
+    image: latexweb-server:dev
+    init: true
+    restart: unless-stopped
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 3000
+      REDIS_URL: redis://redis:6379
+      COMPILE_STORAGE_DIR: /data/compilations
+      # Opcionales: si no se definen en .env, se usan los valores por defecto del código.
+      COMPILE_TTL_SECONDS:
+      COMPILE_MAX_QUEUED:
+      COMPILE_MAX_PDF_BYTES:
+      COMPILE_MAX_UPLOAD_FILE_BYTES:
+      COMPILE_MAX_UPLOAD_TOTAL_BYTES:
+      COMPILE_MAX_UPLOAD_FILES:
+    volumes:
+      - compile-storage:/data/compilations
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-3000}:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  compiler:
+    profiles: [apps]
+    build:
+      context: .
+      target: compiler
+    image: latexweb-compiler:dev
+    init: true
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379
+      COMPILE_STORAGE_DIR: /data/compilations
+      # Las compilaciones montan su subcarpeta de este volumen (volume-subpath).
+      COMPILE_STORAGE_VOLUME: latexweb-compile-storage
+      COMPILE_IMAGE: latexweb-texlive:tl2026-1
+      COMPILE_TIMEOUT_SECONDS:
+      COMPILE_MEMORY:
+      COMPILE_CPUS:
+      COMPILE_PIDS_LIMIT:
+      COMPILE_TMPFS_SIZE:
+      COMPILE_CONCURRENCY:
+      COMPILE_TTL_SECONDS:
+      COMPILE_MAX_PDF_BYTES:
+      COMPILE_MAX_LOG_BYTES:
+    volumes:
+      - compile-storage:/data/compilations
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      redis:
+        condition: service_healthy
+      texlive-image:
+        condition: service_completed_successfully
+
+  web:
+    profiles: [apps]
+    build:
+      context: .
+      target: web
+    image: latexweb-web:dev
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_PORT:-5173}:5173"
+    depends_on:
+      server:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   redis-data:
   minio-data:
+  # Nombre fijo: las compilaciones (contenedores hermanos lanzados por compiler) lo montan por nombre.
+  compile-storage:
+    name: latexweb-compile-storage

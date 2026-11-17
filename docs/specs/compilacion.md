@@ -112,6 +112,10 @@ run --rm --name latexweb-compile-<id> --label latexweb.compile=<id> --init
   `--env-file` ni `--env NOMBRE` sin valor (que reenvía la variable del worker). Así ningún secreto del
   worker llega al contenedor; lo verifica el canario del fixture `malicioso`.
 - **`--mount` y no `-v`:** `-v` se confunde con la `C:` de las rutas de Windows.
+- **Modo volumen (docker compose):** cuando el worker corre en un contenedor (`COMPILE_STORAGE_VOLUME`),
+  los dos montajes pasan a ser `type=volume` del volumen `latexweb-compile-storage` con
+  `volume-subpath=<id>/input` (readonly) y `<id>/out`, derivados solo del id. Los demás flags no cambian.
+  Ver `docs/specs/docker-compose.md`.
 - **Usuario:** en Linux es el `uid:gid` del worker. En Windows se usa `1000:1000` (verificado: escribe en
   `/out` con un bind mount de Windows).
 - **Timeout en dos niveles:**

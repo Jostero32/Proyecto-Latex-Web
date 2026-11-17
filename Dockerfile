@@ -55,7 +55,11 @@ CMD ["node", "/app/node_modules/tsx/dist/cli.mjs", "src/index.ts"]
 # --- Frontend ---
 FROM base AS web
 COPY apps/web apps/web
-RUN pnpm --filter @latexweb/web build
+RUN pnpm --filter @latexweb/web build \
+  # `vite preview` compila vite.config.ts en node_modules/.vite-temp al arrancar: tiene que poder
+  # escribir ahí el usuario `node`, sin darle el resto de node_modules.
+  && mkdir -p apps/web/node_modules/.vite-temp \
+  && chown node:node apps/web/node_modules/.vite-temp
 WORKDIR /app/apps/web
 USER node
 EXPOSE 5173

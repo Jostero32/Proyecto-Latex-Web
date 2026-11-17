@@ -78,6 +78,10 @@ Verificado en Docker 29.5.3 (API 1.54) con todos los flags del sandbox:
   - En Linux, si se corre como no root, se usaría `group_add` con el GID del grupo `docker`; queda
     documentado, no se implementa.
 - **`web`:** `vite build` y `vite preview --host 0.0.0.0 --port 5173`, publicado en `127.0.0.1:5173`.
+  `vite preview` escribe en `node_modules/.vite-temp` al arrancar: esa carpeta se crea en la imagen con
+  dueño `node` (sin eso, el contenedor fallaba con EACCES).
+- **Arranque:** las apps arrancan con `node` + `tsx` directamente (no `pnpm start`), para que las
+  señales de apagado lleguen al proceso.
 - **`texlive-image`:** construye `latexweb-texlive:tl2026-1` desde `apps/compiler/docker/` y termina
   (`entrypoint: ["true"]`). `compiler` espera a que termine bien (`service_completed_successfully`).
 
