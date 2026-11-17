@@ -85,6 +85,32 @@ describe.skipIf(!url)('API /auth de punta a punta', () => {
     expect((await post('/auth/login', { email: 'a@b.cd', password: 'clave-larga-1' }, {})).statusCode).toBe(200);
   });
 
+  // Regresión (hallazgo alto de revisor-seguridad): con app.rateLimit() solo corría el límite por IP.
+  it('rate limit por email: desde IPs distintas contra la misma cuenta, el intento 11 da 429', async () => {
+    const codes: number[] = [];
+    for (let i = 0; i < 11; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        remoteAddress: `10.0.0.${i + 1}`,
+        headers: { origin: ORIGIN },
+        payload: { email: 'victima@b.cd', password: 'clave-larga-1' },
+      });
+      codes.push(res.statusCode);
+    }
+    expect(codes.slice(0, 10).every((c) => c === 401)).toBe(true);
+    expect(codes[10]).toBe(429);
+  });
+
+  it('las respuestas de auth no se cachean y un cuerpo enorme se rechaza', async () => {
+    const res = await post('/auth/login', { email: 'a@b.cd', password: 'x'.repeat(10_000) });
+    expect(res.statusCode).toBe(413);
+    const reg = await post('/auth/register', { email: 'c@d.ef', password: 'clave-larga-1' });
+    expect(reg.headers['cache-control']).toBe('no-store');
+    const bidi = await post('/auth/register', { email: 'e@f.gh', password: 'clave-larga-1', name: 'Ana‮abc' });
+    expect(bidi.json()).toMatchObject({ error: 'invalid_name' });
+  });
+
   it('rate limit: el intento número 11 en 15 minutos da 429', async () => {
     const codes: number[] = [];
     for (let i = 0; i < 11; i++) codes.push((await post('/auth/login', { email: 'x@y.zz', password: 'clave-larga-1' })).statusCode);

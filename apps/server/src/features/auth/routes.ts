@@ -1,5 +1,6 @@
 // Rutas /auth. Ver docs/specs/auth.md.
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import rateLimit, { normalizeIP } from '@fastify/rate-limit';
 import type { Redis } from 'ioredis';
 import { sendError } from '../../lib/http-error';
 import { createRequireUser, SESSION_COOKIE } from './guard';
@@ -13,6 +14,7 @@ export interface AuthDeps {
 }
 
 const RATE_LIMIT = { max: 10, timeWindow: 15 * 60 * 1000 };
+const AUTH_BODY_LIMIT = 4096;
 
 const ERROR_STATUS: Record<AuthError['code'], number> = {
   invalid_email: 400,
@@ -26,22 +28,33 @@ export async function authRoutes(app: FastifyInstance, deps: AuthDeps): Promise<
   const { service, cookieSecure } = deps;
   const requireUser = createRequireUser(service);
 
-  await app.register(import('@fastify/rate-limit'), {
+  await app.register(rateLimit, {
     global: false,
     ...(deps.redis ? { redis: deps.redis, nameSpace: 'latexweb-ratelimit-' } : {}),
-    // Si Redis no responde, no se bloquea el login por eso.
+    // Si Redis no responde, no se bloquea el login por eso (ver docs/backlog.md).
     skipOnError: true,
-    errorResponseBuilder: (_request, context) => ({
-      statusCode: 429,
-      error: 'rate_limited',
-      message: `Demasiados intentos; reintenta en ${Math.ceil(context.ttl / 1000)} s`,
-    }),
   });
-  // Dos límites independientes: por IP y por email (el email se lee del cuerpo, en preHandler).
-  const limitByIp = app.rateLimit({ ...RATE_LIMIT, keyGenerator: (request) => `ip:${request.ip}` });
-  const limitByEmail = app.rateLimit({
+  // Dos límites independientes: por IP (IPv6 agrupada por /64, como hace la librería por defecto) y
+  // por email. Con app.rateLimit() solo correría el primero: los handlers comparten la marca
+  // "ya limitado" de la librería. createRateLimit evalúa cada uno sin esa marca.
+  const byIp = app.createRateLimit({ ...RATE_LIMIT, keyGenerator: (request) => `ip:${normalizeIP(request.ip, 64)}` });
+  const byEmail = app.createRateLimit({
     ...RATE_LIMIT,
-    keyGenerator: (request) => `email:${emailOf(request) ?? request.ip}`,
+    keyGenerator: (request) => `email:${emailOf(request) ?? normalizeIP(request.ip, 64)}`,
+  });
+  const limitAuth = async (request: FastifyRequest, reply: FastifyReply) => {
+    for (const limiter of [byIp, byEmail]) {
+      const result = await limiter(request);
+      // isAllowed=true es "en la lista de excluidos" (no aplica el límite).
+      if (!result.isAllowed && result.isExceeded) {
+        reply.header('Retry-After', String(result.ttlInSeconds));
+        return sendError(reply, 429, 'rate_limited', `Demasiados intentos; reintenta en ${result.ttlInSeconds} s`);
+      }
+    }
+  };
+  // Respuestas con datos del usuario o Set-Cookie: nunca en una caché compartida.
+  app.addHook('onSend', async (_request, reply) => {
+    reply.header('Cache-Control', 'no-store');
   });
 
   app.setErrorHandler<FastifyError>((error, request, reply) => {
@@ -70,14 +83,15 @@ export async function authRoutes(app: FastifyInstance, deps: AuthDeps): Promise<
     if (current) await service.logout(current);
   };
 
-  app.post('/auth/register', { preHandler: [limitByIp, limitByEmail] }, async (request, reply) => {
+  // bodyLimit: un email y una contraseña de hasta 256 caracteres entran de sobra en 4 KB.
+  app.post('/auth/register', { preHandler: limitAuth, bodyLimit: AUTH_BODY_LIMIT }, async (request, reply) => {
     const body = objectBody(request);
     await dropCurrentSession(request);
     const session = await service.register({ email: body.email, password: body.password, name: body.name });
     return setSession(reply, session).code(201).send({ user: session.user });
   });
 
-  app.post('/auth/login', { preHandler: [limitByIp, limitByEmail] }, async (request, reply) => {
+  app.post('/auth/login', { preHandler: limitAuth, bodyLimit: AUTH_BODY_LIMIT }, async (request, reply) => {
     const body = objectBody(request);
     await dropCurrentSession(request);
     const session = await service.login({ email: body.email, password: body.password });

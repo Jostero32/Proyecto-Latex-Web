@@ -1,9 +1,24 @@
-# Roadmap del backend
+# Roadmap
 
-Specs pendientes del backend en orden de dependencia. Cada una se escribe con `/spec <nombre>` antes de
-implementarla (CLAUDE.md). El alcance de cada ítem es orientativo: la spec lo define.
+## Plan vigente: bloques grandes (2026-11-17)
+Para terminar la app rápido, los ítems de abajo se agrupan en bloques, cada uno con **una** spec de
+pasos grandes (CLAUDE.md, "Forma de trabajo"):
 
-Estado: **0** en curso; el resto, pendiente.
+| Bloque | Contenido (ítems de abajo) | Estado |
+|---|---|---|
+| — | compilación (0), auth (3) | **hecho** |
+| B. Núcleo del backend | proyectos-y-archivos (4), compilar-proyecto (5), permisos-y-compartir (6) | siguiente |
+| C. Colaboración y feedback | colaboracion (7), errores-del-log (2), synctex (9) | pendiente |
+| D. Frontend | login, lista de proyectos, editor CodeMirror + Yjs, árbol de archivos, visor PDF.js, panel de errores | pendiente |
+| E. Cierre | historial (8), ci (1), limites-y-cuotas (10), despliegue (11) | pendiente |
+
+Pendientes menores y hallazgos de seguridad: `docs/backlog.md`.
+
+---
+
+## Roadmap original del backend
+Specs pendientes del backend en orden de dependencia. El alcance de cada ítem es orientativo: la spec
+del bloque lo define.
 
 ## Orden
 

@@ -79,14 +79,14 @@ compilar), `@fastify/cookie` y `@fastify/rate-limit` (plugins oficiales). `allow
 Al final: verificación en vivo con `docker compose up` y `revisor-seguridad` sobre `features/auth`.
 
 ## 6. Criterios de aceptación
-- [ ] Registro → cookie `sid` httpOnly → `GET /auth/me` devuelve el usuario; tras logout, `/auth/me` → 401.
-- [ ] El hash en la base es argon2id, y en `Session.id` está el sha256 del token, no el token.
-- [ ] Login con email inexistente y con clave incorrecta da el mismo 401 y un tiempo comparable.
-- [ ] El intento número 11 en 15 minutos → 429.
-- [ ] Un POST con la cookie de sesión y sin Origin, o con un Origin ajeno → 403.
-- [ ] Una sesión vencida da 401 y el barrido la borra.
-- [ ] `docker compose up -d --build` migra la base sola y la API de auth funciona en el stack.
-- [ ] `pnpm test`, `typecheck`, `lint` y `test:integration` en verde.
+- [x] Registro → cookie `sid` httpOnly → `GET /auth/me` devuelve el usuario; tras logout, `/auth/me` → 401.
+- [x] El hash en la base es argon2id, y en `Session.id` está el sha256 del token, no el token.
+- [x] Login con email inexistente y con clave incorrecta da el mismo 401 y un tiempo comparable.
+- [x] El intento número 11 en 15 minutos → 429.
+- [x] Un POST con la cookie de sesión y sin Origin, o con un Origin ajeno → 403.
+- [x] Una sesión vencida da 401 y el barrido la borra.
+- [x] `docker compose up -d --build` migra la base sola y la API de auth funciona en el stack.
+- [x] `pnpm test`, `typecheck`, `lint` y `test:integration` en verde.
 
 ## 7. Riesgos
 - **Enumeración de cuentas:** el registro revela si un email ya existe (409). Es aceptable con rate

@@ -5,6 +5,7 @@ import { getDummyHash, hashPassword, isValidPassword, normalizeEmail, verifyPass
 
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const NAME_MAX = 100;
+const UNSAFE_NAME_CHARACTERS = /[\p{Cc}‪-‮⁦-⁩‎‏]/u;
 
 export interface PublicUser {
   id: string;
@@ -62,7 +63,8 @@ export function createAuthService(db: Db, options: { now?: () => Date; sessionTt
       }
       let cleanName: string | null = null;
       if (name !== undefined && name !== null && name !== '') {
-        if (typeof name !== 'string' || name.trim().length === 0 || name.length > NAME_MAX) {
+        // Sin caracteres de control (Postgres rechaza NUL → 500) ni de control bidi (suplantación en la UI).
+        if (typeof name !== 'string' || name.trim().length === 0 || name.length > NAME_MAX || UNSAFE_NAME_CHARACTERS.test(name)) {
           throw new AuthError('invalid_name', `El nombre debe tener entre 1 y ${NAME_MAX} caracteres`);
         }
         cleanName = name.trim();
@@ -81,8 +83,11 @@ export function createAuthService(db: Db, options: { now?: () => Date; sessionTt
       const normalized = normalizeEmail(email);
       const user = normalized ? await db.user.findUnique({ where: { email: normalized } }) : null;
       // Siempre se verifica un hash, exista o no el usuario: el tiempo no revela qué cuentas existen.
-      const ok = await verifyPassword(user?.passwordHash ?? (await getDummyHash()), typeof password === 'string' ? password : '');
-      if (!user || !ok || !isValidPassword(password)) {
+      // Una contraseña fuera de rango se reemplaza por '' antes de hashear (nunca se hashea una
+      // entrada enorme), y se sigue verificando para mantener el mismo tiempo.
+      const candidate = isValidPassword(password) ? password : '';
+      const ok = await verifyPassword(user?.passwordHash ?? (await getDummyHash()), candidate);
+      if (!user || !ok || candidate === '') {
         throw new AuthError('invalid_credentials', 'Email o contraseña incorrectos');
       }
       return startSession(user);
