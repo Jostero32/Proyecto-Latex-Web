@@ -45,9 +45,23 @@ Tests:
   (Docker, Redis, Postgres, MinIO) o son lentos. Corren con `pnpm test:integration`.
 - No crear carpetas vacías: `plugins/`, `lib/` y cada `features/<funcionalidad>/` aparecen con su primer archivo.
 
+## Forma de trabajo
+- Specs cortas: alcance, diseño, archivos, pasos, criterios y riesgos en lo justo (~1 página).
+- Pasos de alcance grande: cada uno entrega una parte completa y usable de la funcionalidad (rutas +
+  lógica + persistencia + tests), no una pieza suelta. Preferir pocos pasos.
+- Aprobada la spec, implementar de corrido con un commit por paso y reportar al final. Detenerse solo
+  si un supuesto de la spec resulta falso o aparece una decisión de diseño que no está en la spec.
+- Tests escritos junto con el código, sin el subagente `tester` por paso:
+  - unitarios para lógica no trivial y para todo lo de seguridad; no tablas exhaustivas de casos triviales;
+  - un test de punta a punta por funcionalidad;
+  - `pnpm test:integration` solo si cambia algo de compilación o Docker.
+- Una verificación en vivo al final de la funcionalidad, no en cada paso.
+- `revisor-seguridad` una vez al cerrar funcionalidades que tocan sandbox, auth, permisos o archivos.
+  Crítico y alto se corrige en el momento; medio y bajo va a `docs/backlog.md`.
+
 ## Reglas
 - Antes de una funcionalidad nueva, debe existir su spec en docs/specs/
-- Pasos pequeños: implementar, correr tests, luego seguir
+- Al terminar cada paso: `pnpm test`, `pnpm typecheck` y `pnpm lint` en verde antes del commit
 - Nunca habilitar shell-escape en la compilación de LaTeX
 - Toda compilación corre sin red y con límites de CPU, RAM y tiempo
 - No agregar dependencias sin explicar por qué
