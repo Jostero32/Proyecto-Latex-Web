@@ -1,0 +1,144 @@
+# Spec: apps en docker compose
+
+## 1. Objetivo
+Poder levantar todo el sistema (infraestructura, `server`, `compiler` y `web`) con docker compose, sin
+instalar Node ni pnpm en el host. Hoy compose levanta solo la infraestructura y las apps corren en el host
+con `pnpm dev`.
+
+## 2. Alcance
+**Incluye**
+- `Dockerfile` en la raíz, multi-etapa, con un target por app: `server`, `compiler` y `web`.
+- Servicios nuevos en `docker-compose.yml` bajo el perfil `apps`, más un servicio que construye la imagen
+  `latexweb-texlive`.
+- Modo **volumen** para la compilación: el worker en un contenedor lanza las compilaciones con el
+  socket de Docker del host y monta la subcarpeta del trabajo desde un volumen con nombre
+  (`volume-subpath`), en lugar de rutas del host.
+- `SERVER_HOST` (el servidor tiene que escuchar en `0.0.0.0` dentro de su contenedor).
+
+**No incluye**
+- Configuración de producción, TLS, Docker sin root o gVisor (spec `despliegue` del roadmap).
+- Recarga en caliente dentro de los contenedores: para desarrollar se sigue usando `pnpm dev`.
+- CI (spec `ci`).
+
+## 3. Diseño
+
+### Dos formas de correr el sistema
+| Comando | Qué levanta | Compilación |
+|---|---|---|
+| `docker compose up -d` (sin cambios) | postgres, redis y minio | El worker corre en el host con `pnpm dev`; modo **bind** (el actual) |
+| `docker compose --profile apps up -d --build` | todo lo anterior, más texlive-image, server, compiler y web | Modo **volumen** |
+
+El perfil `apps` evita que `docker compose up -d` (el comando de CLAUDE.md para la infraestructura)
+choque con `pnpm dev` en el puerto 3000.
+
+### Por qué un volumen con subpath
+Las compilaciones son contenedores **hermanos** del worker: el worker se los pide al daemon del host
+por el socket, así que no pueden montar rutas del contenedor del worker. En cambio, todos comparten un
+volumen con nombre, `latexweb-compile-storage`:
+- `server` y `compiler` lo montan en `/data/compilations` (`COMPILE_STORAGE_DIR`);
+- cada compilación monta solo su subcarpeta:
+  ```
+  --mount type=volume,source=latexweb-compile-storage,target=/in,volume-subpath=<id>/input,readonly
+  --mount type=volume,source=latexweb-compile-storage,target=/out,volume-subpath=<id>/out
+  ```
+
+Verificado en Docker 29.5.3 (API 1.54) con todos los flags del sandbox:
+- `articulo-simple` compila (exit 0) y el PDF queda en `<id>/out/`;
+- `/in` es de solo lectura (`touch: Read-only file system`) y el uid 1000 escribe en `/out`;
+- Docker rechaza escapar del subpath: `..` y rutas absolutas ("subpath must be a relative path within
+  the volume") y symlinks del volumen que apuntan afuera ("path concatenation escapes the base
+  directory").
+
+### Cambios en el código
+- **`apps/compiler/src/config.ts`:** `COMPILE_STORAGE_VOLUME`. Si está definida, se usa el modo volumen; si
+  no, el modo bind (el actual, para `pnpm dev`).
+- **`apps/compiler/src/docker/docker-args.ts`:** los montajes pasan a ser una unión:
+  - `{ kind: 'bind', inputDir, outputDir }` (lo actual);
+  - `{ kind: 'volume', volume }`. Los subpaths `<id>/input` y `<id>/out` se arman **solo** a partir del
+    id ya validado como uuid. El nombre del volumen se valida con `^[A-Za-z0-9][A-Za-z0-9_.-]*$`.
+
+  Siguen siendo exactamente dos `--mount`, con `/in` `readonly`. Los demás flags no cambian.
+- **`apps/compiler/src/worker/processor.ts`:** elige el modo según la configuración.
+- **`apps/server/src/config.ts`:** `SERVER_HOST`, por defecto `127.0.0.1`.
+
+### Imágenes (`Dockerfile` en la raíz)
+- **Base:** `node:22-bookworm-slim` fijada por digest, con corepack y pnpm `12.18.0`, el mismo que
+  `packageManager`.
+  - Instala con `pnpm install --frozen-lockfile`; sin build: las apps corren con `tsx`, igual que en
+    desarrollo.
+  - `.dockerignore` excluye `node_modules`, `.git`, `dist` y `.env*`.
+- **`server`:** usuario `node` (uid 1000). Escucha en `0.0.0.0:3000` y compose lo publica **solo** en
+  `127.0.0.1:3000`. Healthcheck sobre `/health`.
+- **`compiler`:**
+  - **Binario de `docker`:** se copia desde `docker:29-cli`, fijada por digest. Es la única forma de que
+    `runContainer` y `checkDocker` funcionen sin cambiar su código; no se agrega ninguna dependencia de npm.
+  - **Socket:** monta `/var/run/docker.sock`.
+  - **Usuario root dentro de su contenedor**, por el socket. Con el worker como root, el código actual ya
+    lanza las compilaciones como `1000:1000` y hace `chown` de `out/` (`resolveContainerUser`).
+  - En Linux, si se corre como no root, se usaría `group_add` con el GID del grupo `docker`; queda
+    documentado, no se implementa.
+- **`web`:** `vite build` y `vite preview --host 0.0.0.0 --port 5173`, publicado en `127.0.0.1:5173`.
+- **`texlive-image`:** construye `latexweb-texlive:tl2026-1` desde `apps/compiler/docker/` y termina
+  (`entrypoint: ["true"]`). `compiler` espera a que termine bien (`service_completed_successfully`).
+
+### Compose
+- `server` depende de `redis` healthy. `compiler` depende de `redis` healthy y de `texlive-image`.
+  `web` depende de `server` healthy.
+- Volumen `latexweb-compile-storage` con `name:` explícito, para no depender del prefijo del proyecto.
+- Variables: `REDIS_URL=redis://redis:6379`, `COMPILE_STORAGE_DIR=/data/compilations`,
+  `COMPILE_STORAGE_VOLUME=latexweb-compile-storage` y `SERVER_HOST=0.0.0.0`. Las demás `COMPILE_*` usan
+  sus valores por defecto, salvo que se definan en `.env`.
+
+## 4. Archivos
+**Crear:** `Dockerfile`, `.dockerignore` y `apps/compiler/test/integration/volume-mode.test.ts`.
+
+**Modificar:**
+- `docker-compose.yml`;
+- `apps/compiler/src/config.ts`, `docker/docker-args.ts` y `worker/processor.ts`, con sus tests;
+- `apps/server/src/config.ts`, con su test;
+- `.env.example`, `CLAUDE.md` (sección Comandos) y `docs/specs/compilacion.md` (el modo volumen en
+  "Ejecución en Docker" y "Riesgos").
+
+## 5. Pasos
+1. **Configuración:** `SERVER_HOST` y `COMPILE_STORAGE_VOLUME`, con tests.
+2. **Modo volumen en `docker-args` y en el processor**, con tests unitarios:
+   - exactamente dos montajes;
+   - `/in` readonly;
+   - subpaths derivados solo del id;
+   - rechazo de nombres de volumen inválidos;
+   - el modo bind sin cambios.
+3. **Test de integración del modo volumen:** crea un volumen, lo llena con un contenedor auxiliar,
+   compila `articulo-simple` y `malicioso` con `runContainer` y verifica el PDF y las 5 claves BLOQUEADO.
+4. **`Dockerfile` y `.dockerignore`:** construir los tres targets.
+5. **Compose:** servicios, perfil, volumen y healthchecks.
+6. **Verificación:**
+   - `docker compose --profile apps up -d --build`;
+   - `/probar-compilacion` contra `127.0.0.1:3000` (6/6);
+   - `malicioso` con `LATEXWEB_CANARY` definida en el servicio `compiler`;
+   - `revisor-seguridad` sobre el diff;
+   - documentación.
+
+## 6. Criterios de aceptación
+- [ ] `docker compose --profile apps up -d --build` levanta todo y `/probar-compilacion` da 6/6 en `success`
+      contra el servidor en contenedor.
+- [ ] `docker compose up -d` sigue levantando solo postgres, redis y minio, y `pnpm dev` funciona como antes.
+- [ ] En modo volumen, `malicioso` da las 5 claves BLOQUEADO con `LATEXWEB_CANARY` definida en el contenedor
+      del worker.
+- [ ] Los argumentos en modo volumen tienen exactamente dos `--mount` de tipo `volume`, `/in` readonly y
+      subpaths `<uuid>/input` y `<uuid>/out`; los demás flags del sandbox no cambian.
+- [ ] `server` y `web` solo se publican en `127.0.0.1`.
+- [ ] `pnpm test`, `pnpm typecheck`, `pnpm lint` y `pnpm test:integration` pasan.
+
+## 7. Riesgos
+- **Socket de Docker en un contenedor:** el contenedor `compiler` tiene, en la práctica, root sobre el
+  host. Hoy el worker en el host ya lanza contenedores, pero ahora el acceso queda dentro de un contenedor
+  con dependencias de npm. Es aceptable para uso local. Para producción hace falta Docker sin root o
+  gVisor (spec `despliegue`).
+- **Volumen compartido:** `server` y `compiler` ven todas las compilaciones, igual que hoy con la carpeta
+  compartida. Las compilaciones solo ven su subcarpeta, y Docker impide escapar de ella (verificado).
+- **El barrido sigue funcionando** dentro del worker sobre `/data/compilations`. Los datos persisten entre
+  reinicios del stack mientras exista el volumen.
+- **Tamaño:** la imagen de las apps suma unos cientos de MB (Node y dependencias) a los ~5 GB de TeX Live,
+  y el primer `--build` tarda.
+- **Linux sin Docker Desktop:** el GID del socket varía según la distribución. Queda documentado para
+  cuando el worker deje de correr como root.
