@@ -1,39 +1,35 @@
 // Editor: archivos a la izquierda, código al centro, PDF a la derecha y el panel de problemas abajo. Los
-// costados se ocultan (queda un riel) y se redimensionan. Proyecto, árbol y archivos vienen de la API; el
-// texto todavía se ve sin editar (paso 3: CodeMirror y Yjs) y la compilación es simulada (paso 4).
-// Demos de lo que falta conectar:
-//   ?vista=exito|errores                  el documento, colaboradores y resultados del diseño
-//   ?aviso=permisos|sin-acceso|sin-conexion|doc-grande
-//   ?compilar=timeout|fallo|cola|grande   qué devuelve la próxima compilación simulada
+// costados se ocultan (queda un riel) y se redimensionan. Proyecto y árbol vienen de la API; el texto se
+// edita en vivo con los demás (Yjs por WebSocket, ver collab.ts). La compilación todavía es simulada
+// (paso 4): `?compilar=errores|timeout|fallo|cola|grande` elige qué devuelve.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Diagnostic, Engine, ProjectFile, ProjectSummary, UpdateProjectRequest } from '@latexweb/shared';
+import type * as Y from 'yjs';
 import { FullScreenError, FullScreenLoading } from '../../app/RequireAuth';
-import { COLLABORATOR_COLORS, type Presence } from '../../components/Avatar';
+import { colorFor, type Presence } from '../../components/Avatar';
 import { Button, IconButton } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
-import { Icon } from '../../components/Icon';
+import { Icon, type IconName } from '../../components/Icon';
 import { Notice } from '../../components/Notice';
 import { download, errorMessage, isApiError } from '../../lib/api';
-import { formatBytes } from '../../lib/format';
-import { DIAGNOSTICS_ERRORS, DIAGNOSTICS_SUCCESS, DOCUMENT, DOCUMENT_WITH_ERRORS, PRESENCE, REMOTE_CURSORS } from '../../lib/mock';
+import { formatBytes, MOD_KEY } from '../../lib/format';
+import { DIAGNOSTICS_ERRORS } from '../../lib/mock';
 import { useCurrentUser } from '../auth/api';
-import { exportUrl, useDeleteProject, useProject, useUpdateProject } from '../projects/api';
+import { exportUrl, projectKey, projectsKey, useDeleteProject, useProject, useUpdateProject } from '../projects/api';
 import { ShareDialog } from '../sharing/ShareDialog';
-import { fileUrl, useDeleteFile, useFiles, useFileText, useRenameFile, useUploadFiles, type Upload } from './api';
-import { CodeView } from './CodeView';
+import { fileUrl, filesKey, useDeleteFile, useFiles, useRenameFile, useUploadFiles, type Upload } from './api';
+import { useCollab } from './collab';
 import { FileSearchDialog, LogDialog, NewFileDialog, RenameFileDialog, SettingsDialog } from './EditorDialogs';
 import { FileTree } from './FileTree';
+import { LatexEditor, type ErrorLines, type FormatAction, type LatexEditorHandle } from './LatexEditor';
 import { PdfPane, type CompilePhase, type CompileResult } from './PdfPane';
 import { ProblemsPanel } from './ProblemsPanel';
 import { TopBar, type Connection } from './TopBar';
 import { baseName, buildTree, fileIcon, isImage } from './tree';
 
-type Banner = 'permisos' | 'sin-acceso' | 'sin-conexion' | 'doc-grande';
 type Dialogs = 'share' | 'settings' | 'new-file' | 'search' | 'log' | 'delete-project' | null;
-
-const pick = <T extends string>(value: string | null, options: readonly T[], fallback: T): T =>
-  options.includes(value as T) ? (value as T) : fallback;
 
 /** Lo que se subraya en la línea del error: el comando que falta o el paquete que no existe. */
 function culprit(message: string): string | undefined {
@@ -69,14 +65,30 @@ export function EditorPage() {
 function Editor({ project, files }: { project: ProjectSummary; files: ProjectFile[] }) {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const client = useQueryClient();
   const me = useCurrentUser();
-  const demo = pick<'exito' | 'errores' | 'ninguna'>(params.get('vista'), ['exito', 'errores'], 'ninguna');
-  const notice = pick<Banner | 'ninguno'>(params.get('aviso'), ['permisos', 'sin-acceso', 'sin-conexion', 'doc-grande'], 'ninguno');
   const demoCompile = params.get('compilar');
-  const errorsView = demo === 'errores';
+  const id = project.id;
+
+  // Avisos del server por el WebSocket: alguien cambió el árbol o los datos del proyecto.
+  const onServerNotice = useCallback(
+    (notice: string) => {
+      if (notice === 'files-changed') void client.invalidateQueries({ queryKey: filesKey(id) });
+      if (notice === 'project-changed') {
+        void client.invalidateQueries({ queryKey: projectKey(id) });
+        void client.invalidateQueries({ queryKey: projectsKey });
+      }
+    },
+    [client, id],
+  );
+  const collab = useCollab(id, me, onServerNotice);
   const role = project.role;
   const canEdit = role !== 'viewer';
-  const id = project.id;
+
+  // Al cambiar los permisos, el rol del proyecto también cambió: hay que volver a leerlo.
+  useEffect(() => {
+    if (collab.notice === 'permisos') void client.invalidateQueries({ queryKey: projectKey(id) });
+  }, [collab.notice, client, id]);
 
   const update = useUpdateProject(id);
   const upload = useUploadFiles(id);
@@ -91,37 +103,49 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
   const [left, setLeft] = useState({ open: true, width: 248 });
   // El PDF ocupa 560 px en 1440; en pantallas más chicas, menos, para que el código no quede angosto.
   const [right, setRight] = useState(() => ({ open: true, width: Math.round(Math.min(560, Math.max(380, window.innerWidth * 0.36))) }));
-  const [minimap, setMinimap] = useState(demo === 'exito');
   const [dialog, setDialog] = useState<Dialogs>(null);
   const [deleting, setDeleting] = useState<ProjectFile | null>(null);
   const [renaming, setRenaming] = useState<ProjectFile | null>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const editor = useRef<LatexEditorHandle>(null);
 
   const [phase, setPhase] = useState<CompilePhase>('idle');
   const [seconds, setSeconds] = useState(0);
-  const [result, setResult] = useState<CompileResult | null>(
-    errorsView ? { status: 'error', durationMs: 3100, errorCount: 2 } : demo === 'exito' ? { status: 'success', durationMs: 2400, errorCount: 0 } : null,
-  );
-  const [diagnostics, setDiagnostics] = useState<Diagnostic[] | null>(errorsView ? DIAGNOSTICS_ERRORS : demo === 'exito' ? DIAGNOSTICS_SUCCESS : null);
-  // Las demos arrancan con un PDF bueno de antes; una compilación con errores lo deja atenuado.
-  const [hasPdf, setHasPdf] = useState(demo !== 'ninguna');
-  const [problemsOpen, setProblemsOpen] = useState(errorsView);
-  const [selected, setSelected] = useState<number | null>(errorsView ? 0 : null);
-  const [jumpLine, setJumpLine] = useState<number | null>(errorsView ? 28 : null);
+  const [result, setResult] = useState<CompileResult | null>(null);
+  const [diagnostics, setDiagnostics] = useState<Diagnostic[] | null>(null);
+  const [hasPdf, setHasPdf] = useState(false);
+  const [problemsOpen, setProblemsOpen] = useState(false);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [jump, setJump] = useState<{ line: number; key: number } | null>(null);
   const [syncLine, setSyncLine] = useState<number | null>(null);
-  const [cursor, setCursor] = useState<{ line: number; column: number } | null>(
-    errorsView ? { line: 28, column: 39 } : demo === 'exito' ? { line: 26, column: 38 } : null,
-  );
+  const [cursor, setCursor] = useState<{ line: number; column: number } | null>(null);
 
-  const connection: Connection = notice === 'sin-conexion' ? 'sin-conexion' : errorsView ? 'sincronizando' : 'guardado';
   const tree = useMemo(() => buildTree(files), [files]);
   const paths = useMemo(() => new Set(files.map((f) => f.path)), [files]);
   // Una pestaña de un archivo borrado o movido por otra persona desaparece sola.
   const tabs = openTabs.filter((path) => paths.has(path));
   const activePath = active && paths.has(active) ? active : (tabs.at(-1) ?? null);
   const activeFile = files.find((f) => f.path === activePath) ?? null;
-  const usesDemoDocument = demo !== 'ninguna' && activePath === project.mainFile;
-  const text = useFileText(id, usesDemoDocument ? null : activeFile);
+  const activeId = activeFile?.id ?? null;
+
+  // El Y.Text del archivo abierto (filesVersion: se agregó o quitó un archivo del documento).
+  const { doc, filesVersion, setFile } = collab;
+  const text = useMemo<Y.Text | null>(
+    () => (doc && activeFile?.kind === 'text' ? (doc.getMap<Y.Text>('files').get(activeFile.id) ?? null) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc, activeFile?.id, activeFile?.kind, filesVersion],
+  );
+
+  useEffect(() => setFile(activeId), [activeId, setFile]);
+
+  const docTooLarge = collab.notice === 'doc-grande';
+  const readOnly = !canEdit || collab.readOnly || docTooLarge;
+  const connection: Connection =
+    collab.status === 'disconnected'
+      ? 'sin-conexion'
+      : collab.status === 'connecting' || !collab.synced || collab.unsynced > 0
+        ? 'sincronizando'
+        : 'guardado';
 
   // Compilación simulada (paso 4): en cola → compilando (con el tiempo corriendo) → resultado.
   const compile = useCallback(() => {
@@ -150,12 +174,13 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
         if (demoCompile === 'timeout') setResult({ status: 'timeout', durationMs: 120_000, errorCount: 0 });
         else if (demoCompile === 'fallo') setResult({ status: 'failed', durationMs: 0, errorCount: 0 });
         else if (demoCompile === 'grande') setResult({ status: 'success', durationMs: 4200, errorCount: 0, pdfTooLarge: true });
-        else if (errorsView) {
+        else if (demoCompile === 'errores') {
           setResult({ status: 'error', durationMs: 2600, errorCount: 2 });
           setDiagnostics(DIAGNOSTICS_ERRORS);
+          setProblemsOpen(true);
         } else {
           setResult({ status: 'success', durationMs: 1800, errorCount: 0 });
-          setDiagnostics(demo === 'exito' ? DIAGNOSTICS_SUCCESS : []);
+          setDiagnostics([]);
           setHasPdf(true);
         }
       }, 2300);
@@ -168,7 +193,7 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
       const tick = setInterval(() => setSeconds((s) => s - 1), 1000);
       return () => clearInterval(tick);
     }
-  }, [phase, demoCompile, errorsView, demo]);
+  }, [phase, demoCompile]);
 
   useEffect(() => {
     if (phase === 'busy' && seconds <= 0) {
@@ -197,8 +222,7 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
   const openFile = (path: string, line: number | null = null) => {
     if (!tabs.includes(path)) setOpenTabs([...tabs, path]);
     setActive(path);
-    setJumpLine(line);
-    if (line) setCursor({ line, column: 0 });
+    if (line) setJump({ line, key: Date.now() });
   };
 
   const closeTab = (path: string) => {
@@ -218,23 +242,22 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
     update.mutate(changes, { onSuccess, onError });
   };
 
-  const lines = useMemo(() => {
-    if (usesDemoDocument) return errorsView ? DOCUMENT_WITH_ERRORS : DOCUMENT;
-    return text.data?.split('\n') ?? [];
-  }, [usesDemoDocument, errorsView, text.data]);
-
-  const errorLines = useMemo(() => {
-    const map = new Map<number, string | undefined>();
+  const errorLines = useMemo<ErrorLines>(() => {
+    const map: ErrorLines = new Map();
     if (result?.status !== 'error' || phase !== 'idle') return map;
     for (const d of diagnostics ?? []) if (d.level === 'error' && d.file === activePath && d.line) map.set(d.line, culprit(d.message));
     return map;
   }, [diagnostics, activePath, result, phase]);
 
-  const you: Presence = { name: me.name, email: me.email, color: COLLABORATOR_COLORS[0], you: true };
-  const presence = demo === 'ninguna' ? [you] : [you, ...PRESENCE.slice(0, errorsView ? 1 : 2)];
-  const remoteCursors = usesDemoDocument ? (errorsView ? REMOTE_CURSORS.slice(0, 1) : REMOTE_CURSORS) : [];
+  const pathById = useMemo(() => new Map(files.map((f) => [f.id, f.path])), [files]);
+  const presence: Presence[] = [
+    { name: me.name, email: me.email, color: colorFor(me.id), you: true },
+    ...collab.peers
+      .filter((peer) => peer.userId !== me.id)
+      .map((peer) => ({ name: peer.name, email: peer.email, color: peer.color, file: peer.fileId ? pathById.get(peer.fileId) : undefined })),
+  ];
 
-  if (notice === 'sin-acceso') return <NoAccess title="Ya no tenés acceso a este proyecto" text="El dueño te quitó del proyecto o lo borró. Si creés que es un error, escribile." />;
+  if (collab.denied) return <NoAccess title="Ya no tenés acceso a este proyecto" text="El dueño te quitó del proyecto o lo borró. Si creés que es un error, escribile." />;
 
   return (
     <div className="flex h-screen min-h-[520px] flex-col overflow-hidden bg-bg text-sm">
@@ -264,19 +287,29 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
           {failure}
         </Notice>
       )}
-      {notice === 'permisos' && (
-        <Notice tone="info" alert title="Tus permisos cambiaron" className="rounded-none border-b border-border">
-          Ahora sos Lector en este proyecto. Recargamos el editor para que puedas seguir mirando y compilando.
+      {collab.notice === 'permisos' && (
+        <Notice
+          tone="info"
+          alert
+          title="Tus permisos cambiaron"
+          className="rounded-none border-b border-border"
+          actions={
+            <Button size="sm" variant="ghost" onClick={collab.dismissNotice}>
+              Entendido
+            </Button>
+          }
+        >
+          {canEdit ? 'Reconectamos el editor con tu rol nuevo.' : 'Ahora sos Lector en este proyecto: podés mirar y compilar, pero no editar.'}
         </Notice>
       )}
-      {notice === 'sin-conexion' && (
+      {collab.status === 'disconnected' && (
         <Notice tone="warning" icon="cloudOff" title="Sin conexión" className="rounded-none border-b border-border">
           Lo que escribas queda en este navegador y se sincroniza cuando vuelva la conexión.
         </Notice>
       )}
-      {notice === 'doc-grande' && (
+      {docTooLarge && (
         <Notice tone="error" alert title="El documento llegó al tamaño máximo (10 MB)" className="rounded-none border-b border-border">
-          La edición se cortó para no perder datos. Sacá contenido o dividilo en varios archivos con \input.
+          El último cambio no se guardó y la edición quedó en pausa. Sacá contenido o dividilo en varios archivos con \input y recargá la página.
         </Notice>
       )}
 
@@ -324,45 +357,47 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
         )}
 
         <section aria-label="Editor de código" className="@container flex min-w-0 flex-1 flex-col bg-surface">
-          <Tabs tabs={tabs} active={activePath} readOnly={!canEdit} onSelect={(path) => openFile(path)} onClose={closeTab} />
-          {activeFile?.kind === 'binary' ? null : canEdit ? (
-            <FormatBar minimap={minimap} onMinimap={() => setMinimap(!minimap)} onSync={() => setSyncLine(cursor?.line ?? 1)} />
+          <Tabs tabs={tabs} active={activePath} readOnly={readOnly} onSelect={(path) => openFile(path)} onClose={closeTab} />
+          {activeFile?.kind === 'binary' ? null : !readOnly ? (
+            <FormatBar onFormat={(action) => editor.current?.format(action)} onSync={() => setSyncLine(cursor?.line ?? 1)} />
           ) : (
             <div role="note" className="flex h-11 flex-none items-center gap-2.5 border-b border-border bg-surface-2 px-3.5 text-[13.5px]">
               <Icon name="eye" size={16} />
-              <strong className="font-semibold">Estás en modo lectura.</strong>
-              <span className="hidden text-muted md:inline">Podés compilar y descargar, pero no editar.</span>
+              <strong className="font-semibold">{canEdit ? 'Edición en pausa.' : 'Estás en modo lectura.'}</strong>
+              <span className="hidden text-muted md:inline">
+                {canEdit ? (collab.synced ? 'No se puede editar este documento ahora.' : 'Esperando la conexión con el servidor…') : 'Podés compilar y descargar, pero no editar.'}
+              </span>
               <span className="flex-1" />
               <SyncButton onClick={() => setSyncLine(cursor?.line ?? 1)} />
             </div>
           )}
           {activeFile?.kind === 'binary' ? (
             <BinaryView file={activeFile} url={fileUrl(id, activeFile.id)} />
-          ) : activePath && text.isError ? (
+          ) : !activePath ? (
+            <div className="flex flex-1 items-center justify-center p-8 text-center text-muted">Abrí un archivo del árbol para verlo acá.</div>
+          ) : text && collab.awareness && collab.synced ? (
+            <LatexEditor
+              ref={editor}
+              text={text}
+              awareness={collab.awareness}
+              readOnly={readOnly}
+              errors={errorLines}
+              jump={jump}
+              onCursor={setCursor}
+              label={`Código de ${activePath}`}
+            />
+          ) : collab.synced ? (
             <div className="flex flex-1 items-start p-6">
-              <Notice tone="error" title="No pudimos abrir el archivo" actions={<Button size="sm" icon="sync" onClick={() => void text.refetch()}>Reintentar</Button>}>
-                {errorMessage(text.error)}
+              <Notice tone="warning" title="No encontramos el texto de este archivo">
+                Puede que lo hayan borrado recién. Probá abrirlo de nuevo desde el árbol.
               </Notice>
             </div>
-          ) : activePath && text.isLoading ? (
-            <div aria-busy="true" className="flex flex-1 flex-col gap-2.5 p-5">
+          ) : (
+            <div aria-busy="true" aria-label="Conectando con el documento" className="flex flex-1 flex-col gap-2.5 p-5">
               {[60, 45, 70, 30, 55].map((width, index) => (
                 <span key={index} className="h-3 animate-pulse rounded bg-surface-2" style={{ width: `${width}%` }} />
               ))}
             </div>
-          ) : activePath ? (
-            <CodeView
-              path={activePath}
-              lines={lines}
-              errors={errorLines}
-              jumpLine={jumpLine}
-              cursor={activePath === project.mainFile ? cursor : null}
-              remoteCursors={remoteCursors}
-              readOnly={!canEdit || notice === 'doc-grande'}
-              minimap={minimap && canEdit}
-            />
-          ) : (
-            <div className="flex flex-1 items-center justify-center p-8 text-center text-muted">Abrí un archivo del árbol para verlo acá.</div>
           )}
           <ProblemsPanel
             diagnostics={diagnostics}
@@ -373,7 +408,7 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
               setSelected(index);
               if (d.file && d.line && paths.has(d.file)) openFile(d.file, d.line);
             }}
-            cursor={activePath === project.mainFile ? cursor : null}
+            cursor={activeFile?.kind === 'text' ? cursor : null}
             onShowLog={() => setDialog('log')}
           />
         </section>
@@ -387,7 +422,7 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
                 seconds={seconds}
                 result={result}
                 hasPdf={hasPdf}
-                sample={demo === 'ninguna'}
+                sample
                 engine={project.engine}
                 canChangeEngine={canEdit}
                 syncLine={syncLine}
@@ -530,17 +565,17 @@ function Tabs({ tabs, active, readOnly, onSelect, onClose }: { tabs: string[]; a
   );
 }
 
-const FORMAT_BUTTONS = [
-  { label: 'Negrita (Ctrl+B)', text: 'B', className: 'font-paper font-bold' },
-  { label: 'Cursiva (Ctrl+I)', text: 'I', className: 'font-paper italic' },
-  { label: 'Sección', icon: 'heading' },
-  { label: 'Lista', icon: 'list' },
-  { label: 'Fórmula', icon: 'sigma' },
-  { label: 'Insertar figura', icon: 'image' },
-  { label: 'Cita', icon: 'quote' },
-] as const;
+const FORMAT_BUTTONS: { action: FormatAction; label: string; text?: string; className?: string; icon?: IconName }[] = [
+  { action: 'bold', label: `Negrita (${MOD_KEY}+B)`, text: 'B', className: 'font-paper font-bold' },
+  { action: 'italic', label: `Cursiva (${MOD_KEY}+I)`, text: 'I', className: 'font-paper italic' },
+  { action: 'section', label: 'Sección', icon: 'heading' },
+  { action: 'list', label: 'Lista', icon: 'list' },
+  { action: 'formula', label: 'Fórmula', icon: 'sigma' },
+  { action: 'figure', label: 'Insertar figura', icon: 'image' },
+  { action: 'cite', label: 'Cita', icon: 'quote' },
+];
 
-function FormatBar({ minimap, onMinimap, onSync }: { minimap: boolean; onMinimap: () => void; onSync: () => void }) {
+function FormatBar({ onFormat, onSync }: { onFormat: (action: FormatAction) => void; onSync: () => void }) {
   return (
     <div role="toolbar" aria-label="Formato" className="flex h-11 flex-none items-center gap-1 overflow-x-auto border-b border-border bg-surface px-2.5 [scrollbar-width:none]">
       <div className="flex flex-none gap-0.5 rounded-[7px] bg-surface-2 p-[3px]">
@@ -559,24 +594,22 @@ function FormatBar({ minimap, onMinimap, onSync }: { minimap: boolean; onMinimap
         </button>
       </div>
       <span aria-hidden="true" className="mx-1.5 h-[22px] w-px flex-none bg-border" />
-      {FORMAT_BUTTONS.map((button) =>
-        'icon' in button ? (
-          <IconButton key={button.label} icon={button.icon} size="xs" label={button.label} className="text-text" />
-        ) : (
-          <button
-            key={button.label}
-            type="button"
-            aria-label={button.label}
-            title={button.label}
-            className={`flex size-8 flex-none items-center justify-center rounded-md text-[15px] text-text hover:bg-surface-2 ${button.className}`}
-          >
-            {button.text}
-          </button>
-        ),
-      )}
+      {FORMAT_BUTTONS.map((button) => (
+        <button
+          key={button.action}
+          type="button"
+          aria-label={button.label}
+          title={button.label}
+          // Sin robar el foco: el editor conserva la selección que se va a envolver.
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => onFormat(button.action)}
+          className={`flex size-8 flex-none items-center justify-center rounded-md text-[15px] text-text hover:bg-surface-2 ${button.className ?? ''}`}
+        >
+          {button.icon ? <Icon name={button.icon} size={16} /> : button.text}
+        </button>
+      ))}
       <span className="flex-1" />
       <SyncButton onClick={onSync} />
-      <IconButton icon="minimap" size="xs" label="Minimapa" pressed={minimap} onClick={onMinimap} />
     </div>
   );
 }

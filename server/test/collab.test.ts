@@ -71,6 +71,8 @@ describe('upgrade de /collab', () => {
     for (const origin of ['http://evil.com', 'null']) {
       expect(await rawUpgrade(base, COLLAB_PATH, { Origin: origin })).toBe('HTTP/1.1 403 Forbidden');
     }
+    // El mismo origen que el Host pasa la guarda (sin sesión, 401), como en la API.
+    expect(await rawUpgrade(base, COLLAB_PATH, { Origin: `http://${base}` })).toBe('HTTP/1.1 401 Unauthorized');
   });
 
   // Regresión: `new URL()` lanzaba fuera del try y la promesa rechazada terminaba el proceso.

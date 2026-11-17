@@ -2,7 +2,7 @@
 // muestra una sola vez (el server no lo vuelve a dar), con un panel que lo dice claro.
 import { useState } from 'react';
 import type { AssignableRole, ProjectMember, ShareLink } from '@latexweb/shared';
-import { Avatar, COLLABORATOR_COLORS } from '../../components/Avatar';
+import { Avatar, colorFor } from '../../components/Avatar';
 import { Button, IconButton } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Dialog } from '../../components/Dialog';
@@ -82,7 +82,7 @@ export function ShareDialog({ open, onClose, projectId, projectName }: ShareDial
                 <MemberRow
                   key={member.userId}
                   member={member}
-                  color={COLLABORATOR_COLORS[index % COLLABORATOR_COLORS.length]!}
+                  color={colorFor(member.userId)}
                   first={index === 0}
                   onRole={(role) => setRole.mutate({ userId: member.userId, role })}
                   onRemove={() => setRemoving(member)}

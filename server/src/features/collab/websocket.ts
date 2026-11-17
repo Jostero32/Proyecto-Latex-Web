@@ -154,7 +154,8 @@ export function attachCollab(app: FastifyInstance, hocuspocus: Hocuspocus, { gua
       return;
     }
     const origin = Array.isArray(request.headers.origin) ? request.headers.origin[0] : request.headers.origin;
-    if (!isAllowedOrigin(origin, guard)) {
+    // Como en la API: también se acepta el mismo origen que el Host (la web servida por el mismo host).
+    if (!isAllowedOrigin(origin, guard, request.headers.host)) {
       rejectUpgrade(socket, 403, 'Forbidden');
       return;
     }

@@ -1,8 +1,15 @@
-// Avatares de presencia: color por persona (asignado por orden de llegada) y el nombre siempre al lado,
+// Avatares de presencia: color por persona (sale de su id) y el nombre siempre al lado,
 // en el tooltip y para el lector de pantalla.
 
 /** Colores de colaboración; el texto blanco pasa 4,5:1 sobre cada uno. */
 export const COLLABORATOR_COLORS = ['#3D52C9', '#C2410C', '#0F766E', '#9333EA', '#B45309', '#BE185D'] as const;
+
+/** Color de una persona: sale de su id, así es el mismo en todos los navegadores. */
+export function colorFor(userId: string): string {
+  let hash = 0;
+  for (const char of userId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return COLLABORATOR_COLORS[hash % COLLABORATOR_COLORS.length]!;
+}
 
 export function initials(name: string | null, email: string): string {
   const source = name?.trim() || email;

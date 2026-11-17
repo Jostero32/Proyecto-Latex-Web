@@ -1,12 +1,11 @@
 // Archivos de un proyecto: árbol, contenido, subir, renombrar o mover y borrar.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { FileListResponse, FileResponse, ProjectFile } from '@latexweb/shared';
-import { api, apiText } from '../../lib/api';
+import type { FileListResponse, FileResponse } from '@latexweb/shared';
+import { api } from '../../lib/api';
 import { projectKey, projectsKey } from '../projects/api';
 
 const base = (projectId: string) => `/projects/${encodeURIComponent(projectId)}/files`;
 export const filesKey = (projectId: string) => ['files', projectId] as const;
-const contentKey = (projectId: string, fileId: string) => ['file-content', projectId, fileId] as const;
 
 /** Ruta de la API del contenido: texto, imagen inline o descarga. */
 export const fileUrl = (projectId: string, fileId: string) => `/api${base(projectId)}/${encodeURIComponent(fileId)}`;
@@ -15,15 +14,6 @@ export function useFiles(projectId: string) {
   return useQuery({
     queryKey: filesKey(projectId),
     queryFn: async () => (await api<FileListResponse>(base(projectId))).files,
-  });
-}
-
-/** Texto de un archivo (lo último editado en vivo). En el paso 3 lo reemplaza el documento de Yjs. */
-export function useFileText(projectId: string, file: ProjectFile | null) {
-  return useQuery({
-    queryKey: contentKey(projectId, file?.id ?? ''),
-    queryFn: ({ signal }) => apiText(`${base(projectId)}/${encodeURIComponent(file!.id)}`, signal),
-    enabled: file?.kind === 'text',
   });
 }
 
@@ -41,11 +31,7 @@ export function useUploadFiles(projectId: string) {
       for (const upload of uploads) form.append('file', upload.data, upload.path);
       return (await api<FileListResponse>(base(projectId), { method: 'POST', form })).files;
     },
-    onSuccess: (files) => {
-      // Un archivo reemplazado conserva su id: su contenido en caché ya no vale.
-      for (const file of files) client.removeQueries({ queryKey: contentKey(projectId, file.id) });
-      return invalidate(client, projectId);
-    },
+    onSuccess: () => invalidate(client, projectId),
   });
 }
 

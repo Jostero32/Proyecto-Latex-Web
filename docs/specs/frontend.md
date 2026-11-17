@@ -56,6 +56,19 @@ especificación, del 2026-11-17): sistema visual, pantallas en escritorio y celu
      pasos 3 y 4.
 3. **Editor en vivo:** CodeMirror 6 con y-codemirror.next sobre Hocuspocus, con cursores y presencia,
    subidas arrastrando y el árbol real.
+   - Un `HocuspocusProvider` por proyecto abierto (`/collab`, documento `project:<id>`); la cookie viaja
+     sola (mismo origen). Cada archivo de texto es el `Y.Text` de `files[fileId]`.
+   - CodeMirror con LaTeX (`stex` de legacy-modes), historial, búsqueda, números de línea, línea activa y
+     el tema con los tokens de Pliego. Lector, o documento demasiado grande: solo lectura.
+   - Presencia por awareness (`user`: nombre, color, archivo abierto): avatares arriba y cursores con
+     etiqueta (y-codemirror.next). El color sale del id del usuario, igual en todos los navegadores.
+   - Conexión: Guardado (sin cambios pendientes), Sincronizando… o Sin conexión, reintentando.
+   - Avisos del server: `files-changed` y `project-changed` recargan árbol y proyecto; cierre 4403
+     (permisos) muestra "Tus permisos cambiaron" y relee el rol; si al reconectar no hay permiso, "Ya no
+     tenés acceso"; cierre 4413, "El documento llegó al tamaño máximo" y solo lectura.
+   - La barra de formato y Ctrl+B / Ctrl+I insertan LaTeX en el cursor.
+   - Se van las demos `?vista` y `?aviso` y el documento de ejemplo; queda `?compilar=` hasta el paso 4.
+     El minimapa del diseño queda para después (backlog).
 4. **Compilar:** botón y atajos contra la API, PDF.js, panel de problemas con salto a la línea y SyncTeX.
 
 Los pasos 2 a 4 se detallan antes de empezarlos.
@@ -78,6 +91,21 @@ Los pasos 2 a 4 se detallan antes de empezarlos.
       un enlace y unirse desde otra cuenta funciona en el navegador.
 - [x] Sin sesión, `/` y `/proyectos/:id` mandan a entrar y vuelven después.
 - [x] Un lector ve el editor en solo lectura y no ve acciones de edición.
+
+## Dependencias (paso 3)
+- `@hocuspocus/provider`, `yjs` y `y-protocols`: el cliente del server de colaboración (misma versión
+  que `@hocuspocus/server`).
+- `@codemirror/state`, `view`, `language`, `legacy-modes` (LaTeX), `commands`, `search` y
+  `@lezer/highlight`: el editor, armado a mano en lugar del paquete `codemirror` (sin autocompletado ni
+  plegado, que no se usan).
+- `y-codemirror.next`: une CodeMirror con el Y.Text (cursores remotos y deshacer por persona).
+
+## Criterios (paso 3)
+- [x] Dos personas editan el mismo archivo y ven el texto y el cursor (con nombre) del otro al instante.
+- [x] Pasar a alguien de lector a editor lo reconecta con el aviso y la barra de formato; quitarlo le
+      muestra "Ya no tenés acceso".
+- [x] Lo escrito sigue ahí al recargar; el indicador dice Guardado.
+- [x] El editor va en su propio chunk (CodeMirror y Yjs se bajan al abrir un proyecto).
 
 ## Riesgos y pendientes del diseño
 - Nombre del producto (Pliego o latexweb): está en una sola constante, `PRODUCT_NAME`.

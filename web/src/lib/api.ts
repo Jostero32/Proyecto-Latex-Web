@@ -55,11 +55,6 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   return (await response.json()) as T;
 }
 
-/** Petición con respuesta de texto (el contenido de un archivo). */
-export async function apiText(path: string, signal?: AbortSignal): Promise<string> {
-  return (await send(path, { signal })).text();
-}
-
 export const isApiError = (error: unknown, code?: string): error is ApiRequestError =>
   error instanceof ApiRequestError && (code === undefined || error.code === code);
 

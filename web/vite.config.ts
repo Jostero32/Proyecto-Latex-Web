@@ -14,4 +14,6 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: { proxy },
   preview: { proxy },
+  // El chunk del editor (CodeMirror y Yjs) ronda los 520 kB; se baja solo al abrir un proyecto.
+  build: { chunkSizeWarningLimit: 600 },
 });
