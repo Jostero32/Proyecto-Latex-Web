@@ -1,6 +1,6 @@
 // Sesión en cada petición, `requireUser` y la regla CSRF con cookie. Ver docs/specs/auth.md.
 import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerAsyncHookHandler } from 'fastify';
-import { sendError } from '../../http';
+import { ApiError, sendError } from '../../http';
 import type { AuthService, PublicUser } from './service';
 
 export const SESSION_COOKIE = 'sid';
@@ -25,6 +25,12 @@ export function registerAuthHooks(app: FastifyInstance): void {
       return sendError(reply, 403, 'forbidden_origin', 'Falta la cabecera Origin en una petición con sesión');
     }
   });
+}
+
+/** Id del usuario de la sesión en una ruta protegida por `requireUser`. */
+export function currentUserId(request: FastifyRequest): string {
+  if (!request.user) throw new ApiError(401, 'unauthenticated', 'Hay que iniciar sesión');
+  return request.user.id;
 }
 
 /** preHandler que exige una sesión válida y deja el usuario en `request.user`; si no, 401. */

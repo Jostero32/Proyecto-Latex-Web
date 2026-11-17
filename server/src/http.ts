@@ -5,7 +5,34 @@
 // - Origin: contra peticiones cruzadas desde el navegador (un POST multipart y un WebSocket no
 //   pasan por CORS). Sin Origin (curl, scripts, el healthcheck) se acepta: no es un navegador.
 //   El upgrade de WebSocket no pasa por los hooks de Fastify: collab usa las mismas funciones.
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyError, FastifyInstance, FastifyReply } from 'fastify';
+
+/** Error esperado de la API: los servicios lo lanzan y el manejador de errores lo responde tal cual. */
+export class ApiError extends Error {
+  override name = 'ApiError';
+  constructor(
+    readonly statusCode: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Manejador de errores de la API: ApiError con su código; los errores de cliente de Fastify (cuerpo
+ * inválido o demasiado grande) como `invalid_request` o `payload_too_large`; el resto, 500 sin detalles.
+ */
+export function registerApiErrorHandler(app: FastifyInstance): void {
+  app.setErrorHandler<FastifyError>((error, request, reply) => {
+    if (error instanceof ApiError) return sendError(reply, error.statusCode, error.code, error.message);
+    const status = typeof error.statusCode === 'number' ? error.statusCode : 500;
+    if (status === 413) return sendError(reply, 413, 'payload_too_large', 'La petición supera el tamaño máximo');
+    if (status >= 400 && status < 500) return sendError(reply, status, 'invalid_request', error.message);
+    request.log.error({ err: error }, 'error interno');
+    return sendError(reply, 500, 'internal_error', 'Error interno del servidor');
+  });
+}
 
 /** Respuesta de error con la forma { error, message } que usa toda la API. */
 export function sendError<Code extends string>(
@@ -66,4 +93,10 @@ export function isAllowedOrigin(origin: string | undefined, options: RequestGuar
   if (origin === undefined) return true;
   const normalized = origin.trim().replace(/\/+$/, '').toLowerCase();
   return options.allowedOrigins.some((allowed) => allowed.trim().replace(/\/+$/, '').toLowerCase() === normalized);
+}
+
+/** `Content-Disposition` con el nombre en ASCII (fallback) y en UTF-8 (RFC 6266). */
+export function contentDisposition(type: 'inline' | 'attachment', filename: string): string {
+  const fallback = filename.replace(/[^\x20-\x7e]|["\\]/g, '_');
+  return `${type}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }

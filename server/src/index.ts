@@ -7,6 +7,7 @@ import { createAuthService } from './features/auth/service';
 import { COLLAB_PATH } from './features/collab/websocket';
 import { createBullCompileQueue } from './features/compilations/queue';
 import { createLocalCompilationsStorage, prepareStorageRoot } from './features/compilations/storage';
+import { createStorage } from './storage';
 
 const service: ServiceName = 'server';
 const SESSION_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
@@ -25,10 +26,13 @@ async function main(): Promise<void> {
   const db = createDb(config.databaseUrl);
   await migrateDb(db);
   const auth = createAuthService(db);
+  const storage = createStorage(config.storage);
+  await storage.ensureBucket();
 
   const app = await buildApp(
     {
       auth: { service: auth, cookieSecure: config.cookieSecure, redis },
+      projects: { db, storage, limits: config.projects },
       compilations: {
         queue,
         storage: createLocalCompilationsStorage(config.compilations.storageDir),
@@ -50,6 +54,7 @@ async function main(): Promise<void> {
     clearInterval(sweep);
     await queue.close();
     await closeDb(db);
+    storage.close();
     redis.disconnect();
   });
 

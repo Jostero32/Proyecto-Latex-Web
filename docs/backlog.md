@@ -13,9 +13,14 @@ momento (CLAUDE.md, "Forma de trabajo"). Ordenado por prioridad dentro de cada s
 | baja | auth | Cookie `sid` sin prefijo `__Host-` (cookie tossing desde un subdominio): usar `__Host-sid` cuando `COOKIE_SECURE=true`. |
 | baja | auth | `web` comparte la red `default` con `postgres`, y `server` usa el mismo usuario de base (con DDL) que `migrate`: red propia para postgres y un rol solo DML para el server. |
 | baja | compilación | biber usa 49 de sus 83 bibliotecas nativas precalentadas; una función rara que necesite otra falla con "Read-only file system". |
+| media | proyectos | **Subidas en memoria:** `POST /files` y la importación de zip leen todo en memoria (hasta `PROJECT_MAX_BYTES` por petición). Con varias a la vez el server puede quedarse sin RAM: limitar las subidas concurrentes o pasar a archivos temporales. |
+| baja | proyectos | **Topes con carreras:** dos subidas simultáneas al mismo proyecto pueden pasar juntas el tope de bytes o de archivos (se calcula antes de escribir, sin bloqueo). |
+| baja | proyectos | **Objetos huérfanos en MinIO** si falla la base después de subir un binario (orden deliberado: nunca filas sin objeto). Falta un barrido. |
 | baja | auth | El rate limit guarda claves con el prefijo `latexweb-ratelimit-undefinedundefined-…` (cosmético, del plugin con `app.rateLimit()`). |
 
 ## Fuera de alcance (pendiente de spec)
+- **proyectos:** renombrar o mover una carpeta entera en una sola operación (hoy, un PATCH por archivo);
+  carpetas vacías; transferir la propiedad; salir de un proyecto compartido.
 - **auth:** verificación de email, recuperación de contraseña, OAuth, 2FA, "cerrar todas las sesiones",
   borrar la cuenta.
 - **compilación:** publicar `output.blg` (errores de biber) → `errores-del-log`.

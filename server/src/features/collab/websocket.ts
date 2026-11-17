@@ -21,9 +21,11 @@ export const COLLAB_MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
 
 type ClientConnection = ReturnType<Hocuspocus['handleConnection']>;
 
-/** Monta Hocuspocus en `app` (sin extensiones: ni autenticación ni persistencia todavía). */
-export function attachCollab(app: FastifyInstance, guard: RequestGuardOptions): Hocuspocus {
-  const hocuspocus = new Hocuspocus({ name: 'collab', quiet: true });
+/**
+ * Monta Hocuspocus en `app`. Hasta el paso 3 de docs/specs/backend.md (sesión en el upgrade y
+ * permisos por proyecto) rechaza toda conexión: los documentos ya son los proyectos persistidos.
+ */
+export function attachCollab(app: FastifyInstance, hocuspocus: Hocuspocus, guard: RequestGuardOptions): void {
   const connections = new WeakMap<object, ClientConnection>();
 
   const websocket = crossws({
@@ -83,9 +85,12 @@ export function attachCollab(app: FastifyInstance, guard: RequestGuardOptions): 
       return;
     }
 
-    // AUTENTICACIÓN (pendiente, spec de colaboración): validar aquí la sesión (cookie httpOnly)
-    // y el permiso sobre el documento ANTES de aceptar el upgrade, y rechazar con 401/403 con
-    // rejectUpgrade. Hoy cualquier cliente que llegue al puerto puede conectarse.
+    // Paso 3: validar aquí la sesión (cookie httpOnly) antes de aceptar el upgrade, y el permiso
+    // sobre el proyecto en onConnect. Mientras tanto no se acepta ninguna conexión.
+    if (!COLLAB_ENABLED) {
+      rejectUpgrade(socket, 401, 'Unauthorized');
+      return;
+    }
     try {
       // Mismo hook que dispara la clase Server de Hocuspocus antes del upgrade (extensiones).
       await hocuspocus.hooks('onUpgrade', { request, socket, head, instance: hocuspocus });
@@ -102,9 +107,10 @@ export function attachCollab(app: FastifyInstance, guard: RequestGuardOptions): 
     hocuspocus.closeConnections();
     websocket.closeAll(1001, 'servidor cerrándose');
   });
-
-  return hocuspocus;
 }
+
+/** false hasta que /collab autentique (paso 3 de docs/specs/backend.md). */
+const COLLAB_ENABLED = false as boolean;
 
 /** crossws tipa el socket como Partial<WebSocket> (su propio tipo); Hocuspocus necesita send, close y readyState. */
 function asWebSocketLike(socket: object): WebSocketLike {

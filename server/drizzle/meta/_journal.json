@@ -8,6 +8,13 @@
       "when": 1794932039303,
       "tag": "0000_usuarios_y_sesiones",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794936757979,
+      "tag": "0001_proyectos_archivos_y_permisos",
+      "breakpoints": true
     }
   ]
 }

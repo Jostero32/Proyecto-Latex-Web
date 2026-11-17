@@ -28,18 +28,20 @@ registran en `app.ts`, y `lib/` pasa a `http.ts` y `storage.ts`. En el compiler 
 | `files` | `id`, `project_id`, `path`, `path_key` (NFC + minúsculas, único por proyecto), `kind` (`text` \| `binary`), `size`, `updated_at` |
 | `documents` | `project_id` (PK), `state` (bytea: update de Yjs), `updated_at` |
 | `share_links` | `id`, `project_id`, `token_hash` (sha256), `role`, `created_by`, `expires_at?`, `revoked_at?` |
-| `compilations` | `id` (uuid), `project_id`, `user_id`, `created_at` |
+| `compilations` | `id` (uuid), `project_id`, `user_id`, `created_at` (se crea en el paso 4) |
 
 **Dónde vive cada cosa**
 - El **árbol** (rutas) está en `files` (Postgres): es lo que se valida y se autoriza.
-- El **texto** de los archivos `text` vive en un `Y.Doc` por proyecto (`project:<id>`), con un `Y.Text` por
-  archivo (`file:<fileId>`), persistido en `documents`. Es la única copia del texto: lo que se edita en
+- El **texto** de los archivos `text` vive en un `Y.Doc` por proyecto (`project:<id>`), con un `Y.Map`
+  `files` que guarda un `Y.Text` por archivo (clave: id del archivo), persistido en `documents`. Un mapa
+  y no un tipo raíz por archivo: un tipo raíz de Yjs no se puede borrar. Es la única copia del texto: lo que se edita en
   vivo es lo que se compila y se exporta.
 - Los **binarios** (imágenes, PDF, fuentes) van a MinIO: `projects/<projectId>/files/<fileId>`.
 - Se considera texto un archivo con extensión conocida (`.tex .bib .cls .sty .bst .txt .md`…) y UTF-8
   válido; el resto es binario.
-- La API REST lee y escribe el texto con `hocuspocus.openDirectConnection`, así los editores conectados ven
-  el cambio al instante.
+- La API REST escribe el texto con `hocuspocus.openDirectConnection`, así los editores conectados ven
+  el cambio al instante. Para leer usa el documento abierto en memoria o, si no está abierto, la fila de
+  `documents` (cerrar una conexión directa guarda el documento entero: no vale la pena en una lectura).
 
 **Permisos**: `assertProjectAccess(userId, projectId, action)`. Si el usuario no es miembro, 404 (no revela
 que el proyecto existe); si su rol no alcanza, 403. Lector: ver, exportar y compilar. Editor: además,
@@ -90,7 +92,8 @@ conectados.
 - Se quitan: `@prisma/client`, `@prisma/adapter-pg` y `prisma`.
 
 **Config**: `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `PROJECT_MAX_BYTES`
-(200 MB), `PROJECT_MAX_FILES` (500) y `DOC_MAX_BYTES` (10 MB).
+(200 MB), `PROJECT_MAX_FILES` (500), `FILE_MAX_BYTES` (50 MB; agregado en el paso 2: las subidas se leen
+en memoria) y `DOC_MAX_BYTES` (10 MB, paso 3).
 
 ## 4. Pasos
 1. **Reestructura y Drizzle.** Mover las carpetas (con `git mv`) y aplanar. Drizzle con `users` y

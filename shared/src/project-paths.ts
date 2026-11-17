@@ -163,3 +163,15 @@ function utf8Length(text: string): number {
   }
   return bytes;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Id de la base (proyecto, archivo, usuario, enlace) antes de usarlo en una consulta. */
+export function isUuid(value: string): boolean {
+  return UUID.test(value);
+}
+
+/** Clave de unicidad de una ruta dentro de un proyecto: NFC y minúsculas (ver `findPathCollision`). */
+export function pathKey(path: string): string {
+  return collisionKey(path);
+}

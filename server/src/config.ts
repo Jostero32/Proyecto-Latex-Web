@@ -2,7 +2,9 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_STORAGE_DIRNAME, envPositiveInteger, type Env } from '@latexweb/shared';
+import type { ProjectLimits } from './features/files/service';
 import { DEFAULT_ALLOWED_HOSTS, DEFAULT_ALLOWED_ORIGINS, type RequestGuardOptions } from './http';
+import type { StorageConfig } from './storage';
 
 export { ConfigError } from '@latexweb/shared';
 
@@ -37,6 +39,9 @@ export interface ServerConfig {
   /** Timeout para recibir una petición completa (contra subidas lentas tipo slowloris). */
   requestTimeoutMs: number;
   security: RequestGuardOptions;
+  /** MinIO (S3): binarios de los proyectos. */
+  storage: StorageConfig;
+  projects: ProjectLimits;
   compilations: CompilationsConfig;
 }
 
@@ -55,6 +60,18 @@ export function loadConfig(env: Env = process.env): ServerConfig {
     security: {
       allowedOrigins: list(env.ALLOWED_ORIGINS) ?? DEFAULT_ALLOWED_ORIGINS,
       allowedHosts: list(env.ALLOWED_HOSTS) ?? DEFAULT_ALLOWED_HOSTS,
+    },
+    storage: {
+      endpoint: env.S3_ENDPOINT ?? 'http://127.0.0.1:9000',
+      region: env.S3_REGION ?? 'us-east-1',
+      accessKey: env.S3_ACCESS_KEY ?? 'latexweb',
+      secretKey: env.S3_SECRET_KEY ?? 'latexweb-dev-secret',
+      bucket: env.S3_BUCKET ?? 'latexweb',
+    },
+    projects: {
+      maxBytes: envPositiveInteger(env, 'PROJECT_MAX_BYTES', 200 * MB),
+      maxFiles: envPositiveInteger(env, 'PROJECT_MAX_FILES', 500),
+      fileMaxBytes: envPositiveInteger(env, 'FILE_MAX_BYTES', 50 * MB),
     },
     compilations: {
       storageDir: env.COMPILE_STORAGE_DIR ?? join(tmpdir(), DEFAULT_STORAGE_DIRNAME),
