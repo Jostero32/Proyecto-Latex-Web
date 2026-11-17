@@ -1,0 +1,318 @@
+// Compartir (solo el dueño): miembros con su rol y enlaces para compartir. El enlace recién creado se
+// muestra una sola vez, con un panel que lo dice claro. Paso 1: datos de ejemplo, sin API.
+import { useState } from 'react';
+import type { AssignableRole, ProjectMember, ShareLink } from '@latexweb/shared';
+import { Avatar, COLLABORATOR_COLORS } from '../../components/Avatar';
+import { Button, IconButton } from '../../components/Button';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { Dialog } from '../../components/Dialog';
+import { Icon } from '../../components/Icon';
+import { ROLE_ICONS, ROLE_LABELS } from '../../components/RoleBadge';
+import { shortDate } from '../../lib/format';
+import { MEMBERS, SAMPLE_TOKEN, SHARE_LINKS } from '../../lib/mock';
+
+const EXPIRY_OPTIONS = [
+  { value: 'nunca', label: 'Sin vencimiento' },
+  { value: '1', label: 'En 1 día' },
+  { value: '7', label: 'En 7 días' },
+  { value: '30', label: 'En 30 días' },
+  { value: '365', label: 'En 365 días' },
+  { value: 'otro', label: 'Otra cantidad…' },
+];
+
+interface CreatedLink extends ShareLink {
+  url: string;
+}
+
+export function ShareDialog({ open, onClose, projectName }: { open: boolean; onClose: () => void; projectName: string }) {
+  const [members, setMembers] = useState<ProjectMember[]>(MEMBERS);
+  const [links, setLinks] = useState<ShareLink[]>(SHARE_LINKS);
+  const [created, setCreated] = useState<CreatedLink | null>(null);
+  const [newId, setNewId] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<ProjectMember | null>(null);
+  const [revoking, setRevoking] = useState<ShareLink | null>(null);
+
+  const createLink = (role: AssignableRole, days: number | null) => {
+    const now = Date.now();
+    const link: CreatedLink = {
+      id: `nuevo-${now}`,
+      role,
+      createdAt: new Date(now).toISOString(),
+      expiresAt: days ? new Date(now + days * 86_400_000).toISOString() : null,
+      url: `${window.location.origin}/unirse/${SAMPLE_TOKEN}`,
+    };
+    setCreated(link);
+    setNewId(link.id);
+    setLinks([link, ...links]);
+  };
+
+  return (
+    <>
+      <Dialog open={open} onClose={onClose} title="Compartir" subtitle={projectName} width="lg">
+        <section aria-labelledby="share-members" className="flex flex-col gap-2.5">
+          <h3 id="share-members" className="m-0 text-sm font-semibold">
+            Miembros · {members.length}
+          </h3>
+          <ul className="m-0 flex list-none flex-col rounded-xl border border-border p-0">
+            {members.map((member, index) => (
+              <MemberRow
+                key={member.userId}
+                member={member}
+                color={COLLABORATOR_COLORS[index % COLLABORATOR_COLORS.length]!}
+                first={index === 0}
+                onRole={(role) => setMembers(members.map((m) => (m.userId === member.userId ? { ...m, role } : m)))}
+                onRemove={() => setRemoving(member)}
+              />
+            ))}
+          </ul>
+        </section>
+
+        <section aria-labelledby="share-links" className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <h3 id="share-links" className="m-0 text-sm font-semibold">
+              Enlaces para compartir
+            </h3>
+            <p className="m-0 text-[13.5px] leading-normal text-muted">
+              Quien abra el enlace entra al proyecto con el rol que elijas. Podés revocarlo cuando quieras.
+            </p>
+          </div>
+          {created ? <CreatedPanel link={created} onDone={() => setCreated(null)} /> : <LinkForm onCreate={createLink} />}
+          <div className="flex flex-col gap-2">
+            <span className="text-[13px] font-semibold text-muted">Enlaces vigentes · {links.length}</span>
+            {links.length === 0 ? (
+              <p className="m-0 rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted">No hay enlaces vigentes.</p>
+            ) : (
+              <ul className="m-0 flex list-none flex-col rounded-xl border border-border p-0">
+                {links.map((link, index) => (
+                  <li
+                    key={link.id}
+                    className={`grid grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-3 py-2.5 pr-2 pl-3.5 sm:grid-cols-[96px_minmax(0,1fr)_auto_auto] ${
+                      index ? 'border-t border-border' : ''
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5 text-sm font-semibold">
+                      <Icon name={ROLE_ICONS[link.role]} size={15} />
+                      {ROLE_LABELS[link.role]}
+                    </span>
+                    <span className="flex min-w-0 flex-col text-[13px] text-muted">
+                      <span>Creado el {shortDate(link.createdAt)}</span>
+                      <span>{link.expiresAt ? `Vence el ${shortDate(link.expiresAt)}` : 'Sin vencimiento'}</span>
+                    </span>
+                    {link.id === newId ? (
+                      <span className="hidden rounded-full bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent-text sm:inline">Nuevo</span>
+                    ) : (
+                      <span className="hidden sm:inline" />
+                    )}
+                    <Button
+                      size="sm"
+                      variant="danger-ghost"
+                      aria-label={`Revocar enlace de ${ROLE_LABELS[link.role].toLowerCase()} creado el ${shortDate(link.createdAt)}`}
+                      onClick={() => setRevoking(link)}
+                    >
+                      Revocar
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      </Dialog>
+
+      <ConfirmDialog
+        open={removing !== null}
+        onClose={() => setRemoving(null)}
+        onConfirm={() => setMembers(members.filter((m) => m.userId !== removing?.userId))}
+        title={`¿Quitar a ${removing?.name ?? removing?.email ?? ''}?`}
+        confirmLabel="Quitar del proyecto"
+      >
+        Deja de ver el proyecto en el momento. Si lo tiene abierto, se le cierra.
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={revoking !== null}
+        onClose={() => setRevoking(null)}
+        onConfirm={() => setLinks(links.filter((l) => l.id !== revoking?.id))}
+        title="¿Revocar el enlace?"
+        confirmLabel="Revocar enlace"
+      >
+        Nadie más va a poder unirse con ese enlace. Quienes ya se unieron siguen siendo miembros.
+      </ConfirmDialog>
+    </>
+  );
+}
+
+interface MemberRowProps {
+  member: ProjectMember;
+  color: string;
+  first: boolean;
+  onRole: (role: AssignableRole) => void;
+  onRemove: () => void;
+}
+
+function MemberRow({ member, color, first, onRole, onRemove }: MemberRowProps) {
+  const title = member.name ?? member.email;
+  return (
+    <li className={`flex items-center gap-3 py-2.5 pr-2 pl-3 ${first ? '' : 'border-t border-border'}`}>
+      <Avatar name={member.name} email={member.email} color={color} size={34} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-sm font-semibold">{title}</span>
+        <span title={member.email} className="truncate text-[13px] text-muted">
+          {member.name ? member.email : 'Sin nombre'}
+        </span>
+      </div>
+      {member.role === 'owner' ? (
+        <span title="Al dueño no se lo puede cambiar ni quitar" className="flex items-center gap-1.5 pr-3 text-sm font-semibold text-muted">
+          <Icon name="crown" size={15} />
+          Dueño
+        </span>
+      ) : (
+        <>
+          <select
+            aria-label={`Rol de ${title}`}
+            value={member.role}
+            onChange={(event) => onRole(event.target.value as AssignableRole)}
+            className="h-9 rounded-md border-[1.5px] border-border-input bg-surface px-2 text-sm text-text"
+          >
+            <option value="editor">Editor</option>
+            <option value="viewer">Lector</option>
+          </select>
+          <IconButton icon="x" size="sm" label={`Quitar a ${title} del proyecto`} onClick={onRemove} />
+        </>
+      )}
+    </li>
+  );
+}
+
+function LinkForm({ onCreate }: { onCreate: (role: AssignableRole, days: number | null) => void }) {
+  const [role, setRole] = useState<AssignableRole>('editor');
+  const [expiry, setExpiry] = useState('30');
+  const [days, setDays] = useState('45');
+  const custom = expiry === 'otro';
+  const parsed = Number(days);
+  const badDays = custom && !(Number.isInteger(parsed) && parsed >= 1 && parsed <= 365);
+  const chosenDays = expiry === 'nunca' ? null : custom ? parsed : Number(expiry);
+
+  return (
+    <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-bg p-3.5">
+      <div className="flex flex-col gap-1.5">
+        <span id="link-role" className="text-[13px] font-semibold">
+          Rol
+        </span>
+        <div role="group" aria-labelledby="link-role" className="flex gap-0.5 rounded-lg bg-surface-2 p-[3px]">
+          {(['editor', 'viewer'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={role === value}
+              onClick={() => setRole(value)}
+              className={`flex h-[34px] items-center gap-1.5 rounded-md px-3 text-sm font-semibold ${role === value ? 'bg-surface text-text shadow-sm' : 'text-muted'}`}
+            >
+              <Icon name={ROLE_ICONS[value]} size={15} />
+              {ROLE_LABELS[value]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="link-expiry" className="text-[13px] font-semibold">
+          Vence
+        </label>
+        <select
+          id="link-expiry"
+          value={expiry}
+          onChange={(event) => setExpiry(event.target.value)}
+          className="h-10 rounded-md border-[1.5px] border-border-input bg-surface px-2 text-sm text-text"
+        >
+          {EXPIRY_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {custom && (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="link-days" className="text-[13px] font-semibold">
+            Días
+          </label>
+          <input
+            id="link-days"
+            type="number"
+            min={1}
+            max={365}
+            value={days}
+            aria-invalid={badDays || undefined}
+            aria-describedby="link-days-help"
+            onChange={(event) => setDays(event.target.value)}
+            className={`h-10 w-24 rounded-md border-[1.5px] bg-surface px-2 text-sm text-text ${badDays ? 'border-error' : 'border-border-input'}`}
+          />
+        </div>
+      )}
+      <span className="flex-1" />
+      <Button variant="primary" icon="link" disabled={badDays} onClick={() => onCreate(role, chosenDays)} className="h-10">
+        Crear enlace
+      </Button>
+      {custom && (
+        <span id="link-days-help" className={`w-full text-[13px] ${badDays ? 'text-error' : 'text-muted'}`}>
+          Entre 1 y 365 días.
+        </span>
+      )}
+    </div>
+  );
+}
+
+function CreatedPanel({ link, onDone }: { link: CreatedLink; onDone: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link.url);
+      setCopied(true);
+    } catch {
+      // Sin permiso para el portapapeles: el campo queda seleccionable a mano.
+    }
+  };
+  return (
+    <div role="alert" className="flex flex-col gap-3.5 rounded-xl border-2 border-accent bg-accent-soft/50 p-4">
+      <div className="flex items-start gap-3">
+        <span className="flex size-9 flex-none items-center justify-center rounded-full bg-accent text-on-accent">
+          <Icon name="key" size={18} />
+        </span>
+        <div className="flex flex-col gap-0.5">
+          <strong className="text-[15px] font-semibold">Copialo ahora. No lo vas a volver a ver.</strong>
+          <span className="text-[13.5px] leading-normal text-muted">
+            Por seguridad, el enlace se muestra una sola vez. Si lo perdés, revocalo y creá otro.
+          </span>
+        </div>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="created-link" className="sr-only">
+          Enlace para compartir
+        </label>
+        <div className="flex gap-2">
+          <input
+            id="created-link"
+            readOnly
+            value={link.url}
+            onFocus={(event) => event.target.select()}
+            className="h-10 min-w-0 flex-1 rounded-md border-[1.5px] border-border-input bg-surface px-3 font-mono text-[13px] text-text"
+          />
+          <Button variant="primary" icon={copied ? 'check' : 'copy'} onClick={copy} className="h-10">
+            {copied ? 'Copiado' : 'Copiar'}
+          </Button>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-[13px] text-muted">
+          <span className="flex items-center gap-1 font-semibold text-text">
+            <Icon name={ROLE_ICONS[link.role]} size={14} />
+            {ROLE_LABELS[link.role]}
+          </span>
+          {link.expiresAt ? `Vence el ${shortDate(link.expiresAt)}` : 'Sin vencimiento'}
+        </span>
+        <Button size="sm" onClick={onDone}>
+          Listo, ya lo copié
+        </Button>
+      </div>
+    </div>
+  );
+}

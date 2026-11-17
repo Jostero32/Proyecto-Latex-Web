@@ -7,7 +7,7 @@ Objetivo: un clon de Overleaf usable. Pocas specs, cada una con 3 o 4 pasos gran
 |---|---|---|---|
 | — | compilación, auth | compilar por API, registrarse e iniciar sesión por API | hecho |
 | 1 | `backend.md` (4 pasos) | reestructura y Drizzle; proyectos, archivos, imágenes y permisos; colaboración persistida; compilación de proyectos con errores y SyncTeX | hecho |
-| 2 | `frontend.md` | login, lista de proyectos, editor con árbol de archivos e imágenes, colaboración en vivo con cursores, compilar, visor PDF, panel de errores, SyncTeX | pendiente |
+| 2 | `frontend.md` | login, lista de proyectos, editor con árbol de archivos e imágenes, colaboración en vivo con cursores, compilar, visor PDF, panel de errores, SyncTeX | paso 1 (interfaz) hecho |
 | 3 | `editor-visual.md` | modo visual sobre el mismo documento, barra de formato, insertar figuras y fórmulas | pendiente |
 | 4 | `cierre.md` | historial de versiones, cuotas, despliegue | pendiente |
 

@@ -1,0 +1,200 @@
+// Entrar y crear cuenta. Dos columnas en escritorio (marca e ilustración, formulario); en el celular,
+// solo el formulario. La regla de la contraseña (10 a 256 caracteres) se ve antes de equivocarse.
+// Paso 1: sin API. `?error=email-registrado|credenciales|intentos` muestra cada error.
+import { useState, type FormEvent } from 'react';
+import { useNavigate, useSearchParams } from 'react-router';
+import { Button } from '../../components/Button';
+import { TextField } from '../../components/Field';
+import { Icon } from '../../components/Icon';
+import { Logo } from '../../components/Logo';
+import { Notice } from '../../components/Notice';
+
+const PASSWORD_MIN = 10;
+const PASSWORD_MAX = 256;
+const TAGLINE = 'Escribí con LaTeX en el navegador, junto a tu equipo, sin instalar nada.';
+
+type Mode = 'entrar' | 'crear';
+type DemoError = 'email-registrado' | 'credenciales' | 'intentos' | null;
+
+const ERRORS: Record<Exclude<DemoError, null>, { title: string; text: string }> = {
+  'email-registrado': { title: 'Ese email ya tiene una cuenta', text: 'Si es tuyo, entrá con tu contraseña.' },
+  credenciales: { title: 'El email o la contraseña no coinciden', text: 'Revisalos e intentá de nuevo. Las mayúsculas cuentan.' },
+  intentos: { title: 'Demasiados intentos seguidos', text: 'Por seguridad, pausamos la entrada. Reintentá en 4 minutos.' },
+};
+
+export function LoginPage() {
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const [mode, setMode] = useState<Mode>(params.get('modo') === 'entrar' ? 'entrar' : 'crear');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const errorParam = params.get('error');
+  const error: DemoError = errorParam && errorParam in ERRORS ? (errorParam as DemoError) : null;
+  const creating = mode === 'crear';
+  const visibleError = error === 'email-registrado' && !creating ? null : error;
+  const blocked = visibleError === 'intentos';
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (blocked) return;
+    navigate(params.get('volver') ?? '/');
+  };
+
+  return (
+    <div className="flex min-h-screen flex-wrap bg-bg">
+      <aside className="relative hidden min-w-0 flex-[1_1_560px] flex-col justify-between gap-12 overflow-hidden bg-surface-2 px-16 py-12 lg:flex">
+        <Logo size={28} />
+        <div className="flex max-w-[520px] flex-col gap-5">
+          <p className="m-0 font-serif text-[46px] leading-[1.08] tracking-tight text-balance">{TAGLINE}</p>
+          <p className="m-0 text-[17px] leading-relaxed text-muted">
+            Para estudiantes, investigadores y docentes. Si nunca usaste LaTeX, cada proyecto nuevo arranca con una plantilla
+            lista para escribir.
+          </p>
+        </div>
+        <PaperIllustration />
+      </aside>
+
+      <main className="flex min-w-0 flex-[1_1_480px] items-center justify-center px-6 py-8 sm:px-16 sm:py-12">
+        <div className="flex w-full max-w-[400px] flex-col gap-6">
+          <div className="flex flex-col gap-3.5 lg:hidden">
+            <Logo size={24} />
+            <p className="m-0 text-[15px] leading-normal text-muted">{TAGLINE}</p>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <h1 className="m-0 font-serif text-3xl leading-tight font-medium tracking-tight sm:text-[38px]">
+              {creating ? 'Creá tu cuenta' : 'Qué bueno verte de nuevo'}
+            </h1>
+            <p className="m-0 text-[15px] text-muted">
+              {creating ? 'Solo necesitás un email y una contraseña.' : 'Entrá para seguir con tus proyectos.'}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-surface-2 p-1">
+            {(['entrar', 'crear'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={mode === value}
+                onClick={() => setMode(value)}
+                className={`h-[38px] rounded-md text-sm font-semibold ${mode === value ? 'bg-surface text-text shadow-sm' : 'text-muted'}`}
+              >
+                {value === 'entrar' ? 'Entrar' : 'Crear cuenta'}
+              </button>
+            ))}
+          </div>
+
+          {visibleError && (
+            <Notice tone="error" alert title={ERRORS[visibleError].title} icon={blocked ? 'clock' : undefined}>
+              {ERRORS[visibleError].text}
+            </Notice>
+          )}
+
+          <form onSubmit={submit} className="flex flex-col gap-[18px]">
+            {creating && <TextField label="Nombre" labelNote="(opcional)" autoComplete="name" placeholder="Cómo te ven tus colaboradores" />}
+            <TextField
+              label="Email"
+              type="email"
+              required
+              autoComplete="email"
+              error={visibleError === 'email-registrado' ? 'Ya hay una cuenta con este email.' : null}
+            />
+            <div className="flex flex-col gap-2">
+              <TextField
+                label="Contraseña"
+                type={showPassword ? 'text' : 'password'}
+                required
+                autoComplete={creating ? 'new-password' : 'current-password'}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                invalid={visibleError === 'credenciales'}
+                trailing={
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    className="flex h-9 items-center gap-1.5 rounded px-2.5 text-[13px] font-semibold text-muted hover:text-text"
+                  >
+                    <Icon name={showPassword ? 'eyeOff' : 'eye'} size={16} />
+                    {showPassword ? 'Ocultar' : 'Mostrar'}
+                  </button>
+                }
+              />
+              {creating && <PasswordRule length={password.length} />}
+            </div>
+            <Button type="submit" variant="primary" size="lg" disabled={blocked} className="mt-1">
+              {blocked ? 'Reintentá en 4 min' : creating ? 'Crear cuenta' : 'Entrar'}
+            </Button>
+          </form>
+
+          <p className="m-0 text-center text-sm text-muted">
+            {creating ? '¿Ya tenés cuenta?' : '¿Todavía no tenés cuenta?'}{' '}
+            <button
+              type="button"
+              onClick={() => setMode(creating ? 'entrar' : 'crear')}
+              className="font-semibold text-accent-text underline underline-offset-[3px]"
+            >
+              {creating ? 'Entrá' : 'Creá una'}
+            </button>
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+/** Barra de 10 marcas y el texto de la regla: gris mientras falta, verde al cumplirla, rojo si se pasa. */
+function PasswordRule({ length }: { length: number }) {
+  const ok = length >= PASSWORD_MIN && length <= PASSWORD_MAX;
+  const tooLong = length > PASSWORD_MAX;
+  const color = tooLong ? 'text-error' : ok ? 'text-success' : 'text-muted';
+  const text = tooLong
+    ? `Máximo ${PASSWORD_MAX} caracteres. Tiene ${length}.`
+    : ok
+      ? `Entre ${PASSWORD_MIN} y ${PASSWORD_MAX} caracteres. Listo, tiene ${length}.`
+      : `Entre ${PASSWORD_MIN} y ${PASSWORD_MAX} caracteres. Llevás ${length} de ${PASSWORD_MIN}.`;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-10 gap-[3px]" aria-hidden="true">
+        {Array.from({ length: PASSWORD_MIN }, (_, index) => (
+          <span
+            key={index}
+            className={`h-1 rounded-sm ${index < Math.min(length, PASSWORD_MIN) ? (tooLong ? 'bg-error' : ok ? 'bg-success' : 'bg-accent') : 'bg-border'}`}
+          />
+        ))}
+      </div>
+      <span aria-live="polite" className={`flex items-center gap-1.5 text-[13px] ${color}`}>
+        <Icon name={tooLong ? 'error' : ok ? 'check' : 'info'} size={14} strokeWidth={2.2} />
+        {text}
+      </span>
+    </div>
+  );
+}
+
+/** Ilustración: una hoja con la fórmula y el código con el cursor de Lucía. Decorativa. */
+function PaperIllustration() {
+  return (
+    <div className="relative h-[250px]" aria-hidden="true">
+      <div className="absolute top-0 left-0 flex h-[240px] w-[360px] flex-col gap-2 rounded bg-white px-[34px] py-[30px] font-paper text-[#1b1a17] shadow-pop">
+        <p className="m-0 text-base font-semibold">1&nbsp;&nbsp;&nbsp;Introducción</p>
+        <p className="m-0 text-justify text-[12.5px] leading-normal">
+          La erosión hídrica depende de la lluvia, el suelo, la pendiente y la cobertura [3]. La pérdida anual se estima como
+        </p>
+        <p className="my-1 text-center text-sm italic">A = R · K · LS · C · P</p>
+        <span className="h-[7px] w-[90%] rounded-sm bg-[#eceae4]" />
+        <span className="h-[7px] w-[74%] rounded-sm bg-[#eceae4]" />
+      </div>
+      <div className="absolute top-[130px] left-[210px] flex flex-col rounded-[10px] border border-border bg-surface px-4 py-3 font-mono text-[13px] leading-[22px] shadow-pop">
+        <span>
+          <span className="text-accent">\section</span>
+          <span className="text-faint">{'{'}</span>Introducción<span className="text-faint">{'}'}</span>
+        </span>
+        <span className="flex items-center">
+          <span className="text-math">A = R \cdot K</span>
+          <span className="ml-px h-[17px] w-0.5 bg-[#C2410C]" />
+          <span className="ml-0.5 rounded-[0_4px_4px_4px] bg-[#C2410C] px-1.5 font-sans text-[11px] font-semibold text-white">Lucía</span>
+        </span>
+      </div>
+    </div>
+  );
+}

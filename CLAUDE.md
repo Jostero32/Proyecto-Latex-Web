@@ -51,8 +51,9 @@ compiler/
   src/              index.ts, config.ts, processor.ts, docker.ts, workspace.ts, storage.ts, log.ts
   test/             tests del compiler; test/fixtures/ con los proyectos LaTeX de prueba
 web/
-  src/              main.tsx, app/ (router, providers, layout), lib/ (api.ts), components/ (UI genérica),
-                    features/<f>/ (páginas, componentes y hooks de cada feature)
+  src/              main.tsx, index.css (tokens de Pliego para Tailwind), app/ (router, tema), lib/ (formatos,
+                    pistas del log, datos de ejemplo), components/ (UI genérica), features/<f>/ (páginas,
+                    componentes y hooks de cada feature)
 shared/src/         api/ (contratos por feature) y utilidades puras (project-paths, env)
 ```
 
