@@ -29,7 +29,7 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, children, confi
       title={title}
       footer={
         <>
-          <Button autoFocus onClick={close}>
+          <Button data-autofocus onClick={close}>
             Cancelar
           </Button>
           <Button

@@ -98,6 +98,19 @@ describe('miembros y enlaces', () => {
     expect((await editor.get(`/api/projects/${project.id}`)).statusCode).toBe(404);
   });
 
+  it('ver un enlace antes de unirse: proyecto, dueño y rol, sin unirse', async () => {
+    const editorLink = await link('editor');
+    const guest = await harness.user('invitada@ejemplo.com');
+    const seen = await guest.get(`/api/share/${editorLink.token}`);
+    expect(seen.json()).toEqual({
+      preview: { projectId: project.id, projectName: project.name, ownerName: 'duena', role: 'editor', currentRole: null },
+    });
+    expect(JSON.stringify(seen.json())).not.toContain('@');
+    expect((await guest.get(`/api/projects/${project.id}`)).statusCode).toBe(404);
+    expect((await owner.get(`/api/share/${editorLink.token}`)).json()).toMatchObject({ preview: { currentRole: 'owner' } });
+    expect((await guest.get('/api/share/no-existe')).json()).toMatchObject({ error: 'invalid_link' });
+  });
+
   it('unirse se queda con el rol más alto; un enlace revocado o vencido no sirve; el token no se vuelve a ver', async () => {
     const viewer = await member('lector@ejemplo.com', 'viewer');
     const editorLink = await link('editor');

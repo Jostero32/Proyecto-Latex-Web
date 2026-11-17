@@ -9,14 +9,9 @@ export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const NAME_MAX = 100;
 const UNSAFE_NAME_CHARACTERS = /[\p{Cc}‪-‮⁦-⁩‎‏]/u;
 
-export interface PublicUser {
-  id: string;
-  email: string;
-  name: string | null;
-  createdAt: string;
-}
-
-export type AuthErrorCode = 'invalid_email' | 'weak_password' | 'invalid_name' | 'email_taken' | 'invalid_credentials';
+// Contratos compartidos con la web (shared/src/api/auth.ts).
+import type { AuthErrorCode, PublicUser } from '@latexweb/shared';
+export type { AuthErrorCode, PublicUser };
 
 export class AuthError extends Error {
   override name = 'AuthError';

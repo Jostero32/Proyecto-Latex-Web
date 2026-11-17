@@ -1,44 +1,111 @@
 // Entrar y crear cuenta. Dos columnas en escritorio (marca e ilustración, formulario); en el celular,
 // solo el formulario. La regla de la contraseña (10 a 256 caracteres) se ve antes de equivocarse.
-// Paso 1: sin API. `?error=email-registrado|credenciales|intentos` muestra cada error.
-import { useState, type FormEvent } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Navigate, useNavigate, useSearchParams } from 'react-router';
+import { PASSWORD_MAX_LENGTH as PASSWORD_MAX, PASSWORD_MIN_LENGTH as PASSWORD_MIN } from '@latexweb/shared';
+import { safeReturnPath } from '../../app/RequireAuth';
 import { Button } from '../../components/Button';
 import { TextField } from '../../components/Field';
 import { Icon } from '../../components/Icon';
 import { Logo } from '../../components/Logo';
 import { Notice } from '../../components/Notice';
+import { errorMessage, isApiError } from '../../lib/api';
+import { useLogin, useMe, useRegister } from './api';
 
-const PASSWORD_MIN = 10;
-const PASSWORD_MAX = 256;
 const TAGLINE = 'Escribí con LaTeX en el navegador, junto a tu equipo, sin instalar nada.';
+const WEAK = `Tiene que tener entre ${PASSWORD_MIN} y ${PASSWORD_MAX} caracteres.`;
 
 type Mode = 'entrar' | 'crear';
-type DemoError = 'email-registrado' | 'credenciales' | 'intentos' | null;
 
-const ERRORS: Record<Exclude<DemoError, null>, { title: string; text: string }> = {
-  'email-registrado': { title: 'Ese email ya tiene una cuenta', text: 'Si es tuyo, entrá con tu contraseña.' },
-  credenciales: { title: 'El email o la contraseña no coinciden', text: 'Revisalos e intentá de nuevo. Las mayúsculas cuentan.' },
-  intentos: { title: 'Demasiados intentos seguidos', text: 'Por seguridad, pausamos la entrada. Reintentá en 4 minutos.' },
-};
+interface FormError {
+  title: string;
+  text: string;
+  field?: 'name' | 'email' | 'password';
+  fieldText?: string;
+}
+
+function describe(error: unknown): FormError {
+  if (isApiError(error, 'email_taken')) {
+    return { title: 'Ese email ya tiene una cuenta', text: 'Si es tuyo, entrá con tu contraseña.', field: 'email', fieldText: 'Ya hay una cuenta con este email.' };
+  }
+  if (isApiError(error, 'invalid_credentials')) {
+    return { title: 'El email o la contraseña no coinciden', text: 'Revisalos e intentá de nuevo. Las mayúsculas cuentan.', field: 'password' };
+  }
+  if (isApiError(error, 'invalid_email')) {
+    return { title: 'Revisá el email', text: 'No parece una dirección válida.', field: 'email', fieldText: 'No parece una dirección válida.' };
+  }
+  if (isApiError(error, 'weak_password')) return { title: 'La contraseña no sirve', text: WEAK, field: 'password' };
+  if (isApiError(error, 'invalid_name')) {
+    const text = 'Tiene caracteres que no se permiten o es demasiado largo.';
+    return { title: 'Revisá el nombre', text, field: 'name', fieldText: text };
+  }
+  return { title: 'No pudimos seguir', text: errorMessage(error) };
+}
 
 export function LoginPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const me = useMe();
+  const login = useLogin();
+  const register = useRegister();
   const [mode, setMode] = useState<Mode>(params.get('modo') === 'entrar' ? 'entrar' : 'crear');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const errorParam = params.get('error');
-  const error: DemoError = errorParam && errorParam in ERRORS ? (errorParam as DemoError) : null;
+  const [error, setError] = useState<FormError | null>(null);
+  const [blockedUntil, setBlockedUntil] = useState<number | null>(null);
   const creating = mode === 'crear';
-  const visibleError = error === 'email-registrado' && !creating ? null : error;
-  const blocked = visibleError === 'intentos';
+  const back = safeReturnPath(params.get('volver'));
+  const pending = login.isPending || register.isPending;
+
+  // Pasado el tiempo del límite de intentos, se vuelve a habilitar.
+  useEffect(() => {
+    if (!blockedUntil) return;
+    const timer = setTimeout(() => setBlockedUntil(null), Math.max(0, blockedUntil - Date.now()));
+    return () => clearTimeout(timer);
+  }, [blockedUntil]);
+
+  if (me.data) return <Navigate to={back} replace />;
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setError(null);
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (blocked) return;
-    navigate(params.get('volver') ?? '/');
+    if (blockedUntil || pending) return;
+    if (creating && (password.length < PASSWORD_MIN || password.length > PASSWORD_MAX)) {
+      setError({ title: 'La contraseña no sirve', text: WEAK, field: 'password' });
+      return;
+    }
+    setError(null);
+    const options = {
+      onSuccess: () => navigate(back, { replace: true }),
+      onError: (failure: unknown) => {
+        if (isApiError(failure, 'rate_limited')) {
+          const seconds = failure.retryAfter ?? 15 * 60;
+          setBlockedUntil(Date.now() + seconds * 1000);
+          setError({ title: 'Demasiados intentos seguidos', text: `Por seguridad, pausamos la entrada. Reintentá en ${Math.ceil(seconds / 60)} minutos.` });
+          return;
+        }
+        setError(describe(failure));
+      },
+    };
+    if (creating) register.mutate({ email, password, ...(name.trim() ? { name: name.trim() } : {}) }, options);
+    else login.mutate({ email, password }, options);
   };
+
+  const submitLabel = blockedUntil
+    ? 'Esperá para reintentar'
+    : pending
+      ? creating
+        ? 'Creando la cuenta…'
+        : 'Entrando…'
+      : creating
+        ? 'Crear cuenta'
+        : 'Entrar';
 
   return (
     <div className="flex min-h-screen flex-wrap bg-bg">
@@ -76,7 +143,7 @@ export function LoginPage() {
                 key={value}
                 type="button"
                 aria-pressed={mode === value}
-                onClick={() => setMode(value)}
+                onClick={() => switchMode(value)}
                 className={`h-[38px] rounded-md text-sm font-semibold ${mode === value ? 'bg-surface text-text shadow-sm' : 'text-muted'}`}
               >
                 {value === 'entrar' ? 'Entrar' : 'Crear cuenta'}
@@ -84,20 +151,33 @@ export function LoginPage() {
             ))}
           </div>
 
-          {visibleError && (
-            <Notice tone="error" alert title={ERRORS[visibleError].title} icon={blocked ? 'clock' : undefined}>
-              {ERRORS[visibleError].text}
+          {error && (
+            <Notice tone="error" alert title={error.title} icon={blockedUntil ? 'clock' : undefined}>
+              {error.text}
             </Notice>
           )}
 
           <form onSubmit={submit} className="flex flex-col gap-[18px]">
-            {creating && <TextField label="Nombre" labelNote="(opcional)" autoComplete="name" placeholder="Cómo te ven tus colaboradores" />}
+            {creating && (
+              <TextField
+                label="Nombre"
+                labelNote="(opcional)"
+                autoComplete="name"
+                placeholder="Cómo te ven tus colaboradores"
+                maxLength={100}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                error={error?.field === 'name' ? error.fieldText : null}
+              />
+            )}
             <TextField
               label="Email"
               type="email"
               required
               autoComplete="email"
-              error={visibleError === 'email-registrado' ? 'Ya hay una cuenta con este email.' : null}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              error={error?.field === 'email' ? error.fieldText : null}
             />
             <div className="flex flex-col gap-2">
               <TextField
@@ -107,7 +187,7 @@ export function LoginPage() {
                 autoComplete={creating ? 'new-password' : 'current-password'}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                invalid={visibleError === 'credenciales'}
+                invalid={error?.field === 'password'}
                 trailing={
                   <button
                     type="button"
@@ -122,8 +202,8 @@ export function LoginPage() {
               />
               {creating && <PasswordRule length={password.length} />}
             </div>
-            <Button type="submit" variant="primary" size="lg" disabled={blocked} className="mt-1">
-              {blocked ? 'Reintentá en 4 min' : creating ? 'Crear cuenta' : 'Entrar'}
+            <Button type="submit" variant="primary" size="lg" disabled={blockedUntil !== null || pending} className="mt-1">
+              {submitLabel}
             </Button>
           </form>
 
@@ -131,7 +211,7 @@ export function LoginPage() {
             {creating ? '¿Ya tenés cuenta?' : '¿Todavía no tenés cuenta?'}{' '}
             <button
               type="button"
-              onClick={() => setMode(creating ? 'entrar' : 'crear')}
+              onClick={() => switchMode(creating ? 'entrar' : 'crear')}
               className="font-semibold text-accent-text underline underline-offset-[3px]"
             >
               {creating ? 'Entrá' : 'Creá una'}

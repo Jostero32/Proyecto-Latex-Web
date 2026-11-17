@@ -1,5 +1,5 @@
 // Compartir (solo el dueño): miembros con su rol y enlaces para compartir. El enlace recién creado se
-// muestra una sola vez, con un panel que lo dice claro. Paso 1: datos de ejemplo, sin API.
+// muestra una sola vez (el server no lo vuelve a dar), con un panel que lo dice claro.
 import { useState } from 'react';
 import type { AssignableRole, ProjectMember, ShareLink } from '@latexweb/shared';
 import { Avatar, COLLABORATOR_COLORS } from '../../components/Avatar';
@@ -7,9 +7,11 @@ import { Button, IconButton } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Dialog } from '../../components/Dialog';
 import { Icon } from '../../components/Icon';
+import { Notice } from '../../components/Notice';
 import { ROLE_ICONS, ROLE_LABELS } from '../../components/RoleBadge';
+import { errorMessage } from '../../lib/api';
 import { shortDate } from '../../lib/format';
-import { MEMBERS, SAMPLE_TOKEN, SHARE_LINKS } from '../../lib/mock';
+import { joinUrl, useCreateShareLink, useMembers, useRemoveMember, useRevokeShareLink, useSetMemberRole, useShareLinks } from './api';
 
 const EXPIRY_OPTIONS = [
   { value: 'nunca', label: 'Sin vencimiento' },
@@ -24,47 +26,70 @@ interface CreatedLink extends ShareLink {
   url: string;
 }
 
-export function ShareDialog({ open, onClose, projectName }: { open: boolean; onClose: () => void; projectName: string }) {
-  const [members, setMembers] = useState<ProjectMember[]>(MEMBERS);
-  const [links, setLinks] = useState<ShareLink[]>(SHARE_LINKS);
+interface ShareDialogProps {
+  open: boolean;
+  onClose: () => void;
+  projectId: string;
+  projectName: string;
+}
+
+export function ShareDialog({ open, onClose, projectId, projectName }: ShareDialogProps) {
+  const members = useMembers(projectId, open);
+  const links = useShareLinks(projectId, open);
+  const setRole = useSetMemberRole(projectId);
+  const removeMember = useRemoveMember(projectId);
+  const createLink = useCreateShareLink(projectId);
+  const revokeLink = useRevokeShareLink(projectId);
   const [created, setCreated] = useState<CreatedLink | null>(null);
   const [newId, setNewId] = useState<string | null>(null);
   const [removing, setRemoving] = useState<ProjectMember | null>(null);
   const [revoking, setRevoking] = useState<ShareLink | null>(null);
+  const failed = [setRole, removeMember, createLink, revokeLink].find((m) => m.isError);
 
-  const createLink = (role: AssignableRole, days: number | null) => {
-    const now = Date.now();
-    const link: CreatedLink = {
-      id: `nuevo-${now}`,
-      role,
-      createdAt: new Date(now).toISOString(),
-      expiresAt: days ? new Date(now + days * 86_400_000).toISOString() : null,
-      url: `${window.location.origin}/unirse/${SAMPLE_TOKEN}`,
-    };
-    setCreated(link);
-    setNewId(link.id);
-    setLinks([link, ...links]);
+  const create = (role: AssignableRole, days: number | null) =>
+    createLink.mutate(
+      { role, ...(days ? { expiresInDays: days } : {}) },
+      {
+        onSuccess: ({ token, ...link }) => {
+          setCreated({ ...link, url: joinUrl(token) });
+          setNewId(link.id);
+        },
+      },
+    );
+
+  const close = () => {
+    setCreated(null);
+    onClose();
   };
 
   return (
     <>
-      <Dialog open={open} onClose={onClose} title="Compartir" subtitle={projectName} width="lg">
+      <Dialog open={open} onClose={close} title="Compartir" subtitle={projectName} width="lg">
+        {failed?.isError && (
+          <Notice tone="error" alert title="No se pudo hacer el cambio">
+            {errorMessage(failed.error)}
+          </Notice>
+        )}
         <section aria-labelledby="share-members" className="flex flex-col gap-2.5">
           <h3 id="share-members" className="m-0 text-sm font-semibold">
-            Miembros · {members.length}
+            Miembros{members.data ? ` · ${members.data.length}` : ''}
           </h3>
-          <ul className="m-0 flex list-none flex-col rounded-xl border border-border p-0">
-            {members.map((member, index) => (
-              <MemberRow
-                key={member.userId}
-                member={member}
-                color={COLLABORATOR_COLORS[index % COLLABORATOR_COLORS.length]!}
-                first={index === 0}
-                onRole={(role) => setMembers(members.map((m) => (m.userId === member.userId ? { ...m, role } : m)))}
-                onRemove={() => setRemoving(member)}
-              />
-            ))}
-          </ul>
+          {members.isPending && <ListPlaceholder rows={2} />}
+          {members.isError && <ListFailed text="No pudimos cargar los miembros." onRetry={() => void members.refetch()} />}
+          {members.data && (
+            <ul className="m-0 flex list-none flex-col rounded-xl border border-border p-0">
+              {members.data.map((member, index) => (
+                <MemberRow
+                  key={member.userId}
+                  member={member}
+                  color={COLLABORATOR_COLORS[index % COLLABORATOR_COLORS.length]!}
+                  first={index === 0}
+                  onRole={(role) => setRole.mutate({ userId: member.userId, role })}
+                  onRemove={() => setRemoving(member)}
+                />
+              ))}
+            </ul>
+          )}
         </section>
 
         <section aria-labelledby="share-links" className="flex flex-col gap-3">
@@ -76,14 +101,17 @@ export function ShareDialog({ open, onClose, projectName }: { open: boolean; onC
               Quien abra el enlace entra al proyecto con el rol que elijas. Podés revocarlo cuando quieras.
             </p>
           </div>
-          {created ? <CreatedPanel link={created} onDone={() => setCreated(null)} /> : <LinkForm onCreate={createLink} />}
+          {created ? <CreatedPanel link={created} onDone={() => setCreated(null)} /> : <LinkForm pending={createLink.isPending} onCreate={create} />}
           <div className="flex flex-col gap-2">
-            <span className="text-[13px] font-semibold text-muted">Enlaces vigentes · {links.length}</span>
-            {links.length === 0 ? (
+            <span className="text-[13px] font-semibold text-muted">Enlaces vigentes{links.data ? ` · ${links.data.length}` : ''}</span>
+            {links.isPending && <ListPlaceholder rows={1} />}
+            {links.isError && <ListFailed text="No pudimos cargar los enlaces." onRetry={() => void links.refetch()} />}
+            {links.data?.length === 0 && (
               <p className="m-0 rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted">No hay enlaces vigentes.</p>
-            ) : (
+            )}
+            {links.data && links.data.length > 0 && (
               <ul className="m-0 flex list-none flex-col rounded-xl border border-border p-0">
-                {links.map((link, index) => (
+                {[...links.data].reverse().map((link, index) => (
                   <li
                     key={link.id}
                     className={`grid grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-3 py-2.5 pr-2 pl-3.5 sm:grid-cols-[96px_minmax(0,1fr)_auto_auto] ${
@@ -122,7 +150,7 @@ export function ShareDialog({ open, onClose, projectName }: { open: boolean; onC
       <ConfirmDialog
         open={removing !== null}
         onClose={() => setRemoving(null)}
-        onConfirm={() => setMembers(members.filter((m) => m.userId !== removing?.userId))}
+        onConfirm={() => removing && removeMember.mutate(removing.userId)}
         title={`¿Quitar a ${removing?.name ?? removing?.email ?? ''}?`}
         confirmLabel="Quitar del proyecto"
       >
@@ -131,13 +159,44 @@ export function ShareDialog({ open, onClose, projectName }: { open: boolean; onC
       <ConfirmDialog
         open={revoking !== null}
         onClose={() => setRevoking(null)}
-        onConfirm={() => setLinks(links.filter((l) => l.id !== revoking?.id))}
+        onConfirm={() => {
+          if (!revoking) return;
+          revokeLink.mutate(revoking.id);
+          if (revoking.id === created?.id) setCreated(null);
+        }}
         title="¿Revocar el enlace?"
         confirmLabel="Revocar enlace"
       >
         Nadie más va a poder unirse con ese enlace. Quienes ya se unieron siguen siendo miembros.
       </ConfirmDialog>
     </>
+  );
+}
+
+function ListPlaceholder({ rows }: { rows: number }) {
+  return (
+    <div aria-busy="true" className="flex flex-col rounded-xl border border-border">
+      {Array.from({ length: rows }, (_, index) => (
+        <div key={index} className={`flex h-14 items-center gap-3 px-3 ${index ? 'border-t border-border' : ''}`}>
+          <span className="size-[34px] animate-pulse rounded-full bg-surface-2" />
+          <span className="h-3 w-40 animate-pulse rounded bg-surface-2" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ListFailed({ text, onRetry }: { text: string; onRetry: () => void }) {
+  return (
+    <div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-sm">
+      <span className="flex items-center gap-2 text-error">
+        <Icon name="error" size={16} />
+        {text}
+      </span>
+      <Button size="sm" icon="sync" onClick={onRetry}>
+        Reintentar
+      </Button>
+    </div>
   );
 }
 
@@ -183,7 +242,7 @@ function MemberRow({ member, color, first, onRole, onRemove }: MemberRowProps) {
   );
 }
 
-function LinkForm({ onCreate }: { onCreate: (role: AssignableRole, days: number | null) => void }) {
+function LinkForm({ pending, onCreate }: { pending: boolean; onCreate: (role: AssignableRole, days: number | null) => void }) {
   const [role, setRole] = useState<AssignableRole>('editor');
   const [expiry, setExpiry] = useState('30');
   const [days, setDays] = useState('45');
@@ -249,7 +308,7 @@ function LinkForm({ onCreate }: { onCreate: (role: AssignableRole, days: number 
         </div>
       )}
       <span className="flex-1" />
-      <Button variant="primary" icon="link" disabled={badDays} onClick={() => onCreate(role, chosenDays)} className="h-10">
+      <Button variant="primary" icon="link" disabled={badDays || pending} onClick={() => onCreate(role, chosenDays)} className="h-10">
         Crear enlace
       </Button>
       {custom && (

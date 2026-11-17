@@ -5,8 +5,10 @@ import {
   DEFAULT_MAIN_FILE,
   detectEngineFromSource,
   ENGINES,
+  higherRole,
   isUuid,
   isValidMainFile,
+  ROLE_RANK,
   type Engine,
   type ProjectRole,
   type ProjectSummary,
@@ -24,11 +26,10 @@ import { writeZip, type ZipItem } from './zip';
 /** Lector: ver, exportar y compilar. Editor: además, escribir. Dueño: además, administrar. */
 export type ProjectAction = 'read' | 'write' | 'manage';
 
-const RANK: Record<ProjectRole, number> = { viewer: 0, editor: 1, owner: 2 };
 const REQUIRED: Record<ProjectAction, ProjectRole> = { read: 'viewer', write: 'editor', manage: 'owner' };
 
-export const roleAllows = (role: ProjectRole, action: ProjectAction) => RANK[role] >= RANK[REQUIRED[action]];
-export const higherRole = (a: ProjectRole, b: ProjectRole): ProjectRole => (RANK[a] >= RANK[b] ? a : b);
+export const roleAllows = (role: ProjectRole, action: ProjectAction) => ROLE_RANK[role] >= ROLE_RANK[REQUIRED[action]];
+export { higherRole };
 
 export interface ProjectAccess {
   project: Project;

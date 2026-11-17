@@ -38,6 +38,8 @@ interface PdfPaneProps {
   onShowProblems: () => void;
   onShowLog: () => void;
   onJumpToLine: (line: number) => void;
+  /** La página es una muestra: la compilación real llega en el paso 4. */
+  sample?: boolean;
 }
 
 const ZOOMS = [50, 67, 75, 92, 100, 125, 150, 200];
@@ -70,8 +72,8 @@ export function PdfPane(props: PdfPaneProps) {
 
       <div role="toolbar" aria-label="Vista del PDF" className="flex h-10 flex-none items-center gap-0.5 border-b border-border bg-bg px-2 text-[13px] text-muted">
         <IconButton icon="chevLeft" size="xs" label="Página anterior" disabled />
-        <span className="min-w-11 text-center font-mono text-xs text-text">1 / 2</span>
-        <IconButton icon="chevRight" size="xs" label="Página siguiente" />
+        <span className="min-w-11 text-center font-mono text-xs text-text">{hasPdf ? '1 / 2' : '– / –'}</span>
+        <IconButton icon="chevRight" size="xs" label="Página siguiente" disabled={!hasPdf} />
         <span aria-hidden="true" className="mx-1.5 h-[18px] w-px bg-border" />
         <IconButton icon="zoomOut" size="xs" label="Alejar" onClick={() => changeZoom(-1)} disabled={zoomIndex === 0} />
         <span className="min-w-11 text-center font-mono text-xs text-text">{zoom} %</span>
@@ -92,6 +94,11 @@ export function PdfPane(props: PdfPaneProps) {
             style={{ zoom: zoom / 92 }}
             title="Clic en el PDF para ir a esa línea del código"
           >
+            {props.sample && (
+              <p className="m-0 w-[440px] max-w-full rounded-lg bg-surface px-3 py-2 text-[13px] text-muted shadow-sm">
+                PDF de muestra: la compilación real se conecta en el paso 4.
+              </p>
+            )}
             <SamplePage syncLine={syncLine} onJumpToLine={onJumpToLine} />
             <div className="h-[120px] w-[440px] flex-none bg-white px-[50px] pt-[50px] font-paper text-[#1b1a17] shadow-[0_1px_3px_rgb(0_0_0/0.14)]">
               <p className="m-0 text-xs font-semibold">2&nbsp;&nbsp;&nbsp;Métodos</p>

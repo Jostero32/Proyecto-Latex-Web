@@ -8,11 +8,12 @@ import {
   type JoinResponse,
   type ProjectMember,
   type ShareLink,
+  type SharePreview,
 } from '@latexweb/shared';
 import { and, asc, eq, gt, isNull, or } from 'drizzle-orm';
 import type { Db } from '../../db';
 import { ApiError } from '../../http';
-import { projectMembers, shareLinks, users } from '../../schema';
+import { projectMembers, projects, shareLinks, users } from '../../schema';
 import type { ProjectDocs } from '../collab/documents';
 import { higherRole } from '../projects/service';
 
@@ -42,6 +43,8 @@ export interface SharingService {
   createLink(projectId: string, createdBy: string, role: unknown, expiresInDays: unknown): Promise<CreatedShareLink>;
   links(projectId: string): Promise<ShareLink[]>;
   revokeLink(projectId: string, linkId: string): Promise<void>;
+  /** Qué proyecto y rol da el enlace, sin unirse. */
+  preview(userId: string, token: string): Promise<SharePreview>;
   /** Si ya era miembro, se queda con el rol más alto. */
   join(userId: string, token: string): Promise<JoinResponse>;
 }
@@ -57,6 +60,18 @@ export function createSharingService(db: Db, docs: ProjectDocs): SharingService 
       : [];
     if (!row) throw new ApiError(404, 'not_found', 'No es miembro del proyecto');
     return row;
+  }
+
+  /** El enlace vigente del token, o 404 `invalid_link` (no existe, venció o fue revocado). */
+  async function validLink(token: string) {
+    const [link] = await db
+      .select()
+      .from(shareLinks)
+      .where(and(eq(shareLinks.tokenHash, hashShareToken(token)), isNull(shareLinks.revokedAt)));
+    if (!link || (link.expiresAt && link.expiresAt <= new Date())) {
+      throw new ApiError(404, 'invalid_link', 'El enlace no existe, venció o fue revocado');
+    }
+    return link;
   }
 
   async function changeableMember(projectId: string, userId: string): Promise<ProjectMember> {
@@ -137,14 +152,24 @@ export function createSharingService(db: Db, docs: ProjectDocs): SharingService 
       if (!row) throw new ApiError(404, 'not_found', 'El enlace no existe');
     },
 
+    async preview(userId, token) {
+      const link = await validLink(token);
+      const [project] = await db.select({ name: projects.name }).from(projects).where(eq(projects.id, link.projectId));
+      const [owner] = await db
+        .select({ name: users.name })
+        .from(projectMembers)
+        .innerJoin(users, eq(users.id, projectMembers.userId))
+        .where(and(eq(projectMembers.projectId, link.projectId), eq(projectMembers.role, 'owner')));
+      const [mine] = await db
+        .select({ role: projectMembers.role })
+        .from(projectMembers)
+        .where(and(eq(projectMembers.projectId, link.projectId), eq(projectMembers.userId, userId)));
+      // Del dueño, solo el nombre: el email no se muestra a quien todavía no es miembro.
+      return { projectId: link.projectId, projectName: project?.name ?? '', ownerName: owner?.name ?? null, role: link.role, currentRole: mine?.role ?? null };
+    },
+
     async join(userId, token) {
-      const [link] = await db
-        .select()
-        .from(shareLinks)
-        .where(and(eq(shareLinks.tokenHash, hashShareToken(token)), isNull(shareLinks.revokedAt)));
-      if (!link || (link.expiresAt && link.expiresAt <= new Date())) {
-        throw new ApiError(404, 'invalid_link', 'El enlace no existe, venció o fue revocado');
-      }
+      const link = await validLink(token);
       return db.transaction(async (tx) => {
         const [current] = await tx
           .select({ role: projectMembers.role })

@@ -1,20 +1,27 @@
-// Diálogos de Mis proyectos: nuevo proyecto, importar zip y renombrar.
+// Diálogos de Mis proyectos: nuevo proyecto, importar zip y renombrar. Cada uno llama a la API y
+// muestra el error en lenguaje humano.
 import { useRef, useState, type DragEvent } from 'react';
+import { useNavigate } from 'react-router';
 import { Button } from '../../components/Button';
 import { Dialog } from '../../components/Dialog';
 import { TextField } from '../../components/Field';
 import { Icon } from '../../components/Icon';
 import { Notice } from '../../components/Notice';
+import { errorMessage, isApiError } from '../../lib/api';
 import { formatBytes } from '../../lib/format';
+import { useCreateProject, useImportProject, useUpdateProject } from './api';
 
 // Igual que MAX_NAME_LENGTH del server.
 const NAME_MAX = 120;
 
-export function NewProjectDialog({ open, onClose, onCreate }: { open: boolean; onClose: () => void; onCreate: (name: string) => void }) {
+export function NewProjectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [name, setName] = useState('');
+  const create = useCreateProject();
+  const navigate = useNavigate();
   const valid = name.trim().length > 0 && name.trim().length <= NAME_MAX;
   const close = () => {
     setName('');
+    create.reset();
     onClose();
   };
   return (
@@ -25,22 +32,23 @@ export function NewProjectDialog({ open, onClose, onCreate }: { open: boolean; o
       footer={
         <>
           <Button onClick={close}>Cancelar</Button>
-          <Button variant="primary" type="submit" form="new-project" disabled={!valid}>
-            Crear proyecto
+          <Button variant="primary" type="submit" form="new-project" disabled={!valid || create.isPending}>
+            {create.isPending ? 'Creando…' : 'Crear proyecto'}
           </Button>
         </>
       }
     >
+      {create.isError && <Notice tone="error" title="No pudimos crear el proyecto">{errorMessage(create.error)}</Notice>}
       <form
         id="new-project"
         onSubmit={(event) => {
           event.preventDefault();
-          if (valid) onCreate(name.trim());
+          if (valid) create.mutate(name.trim(), { onSuccess: (project) => navigate(`/proyectos/${project.id}`) });
         }}
       >
         <TextField
           label="Nombre del proyecto"
-          autoFocus
+          data-autofocus
           value={name}
           maxLength={NAME_MAX}
           onChange={(event) => setName(event.target.value)}
@@ -52,38 +60,47 @@ export function NewProjectDialog({ open, onClose, onCreate }: { open: boolean; o
   );
 }
 
-type ImportError = 'invalido' | 'muchos' | 'grande';
+function importError(error: unknown): { title: string; text: string } {
+  if (isApiError(error, 'too_many_files')) {
+    return { title: 'El zip trae demasiados archivos.', text: 'El máximo es 500. Probá quitar los .aux, .log y otros archivos que genera LaTeX.' };
+  }
+  if (isApiError(error, 'project_too_large') || isApiError(error, 'file_too_large') || isApiError(error, 'payload_too_large')) {
+    return { title: 'El zip es demasiado grande.', text: 'El máximo es 200 MB en total y 50 MB por archivo. Probá achicar las imágenes o sacar videos.' };
+  }
+  if (isApiError(error, 'invalid_zip') || isApiError(error, 'invalid_path')) {
+    return {
+      title: 'No pudimos abrir ese zip.',
+      text: 'Puede estar dañado o traer enlaces simbólicos o rutas raras. Probá volver a comprimir la carpeta del proyecto.',
+    };
+  }
+  return { title: 'No pudimos importar el zip.', text: errorMessage(error) };
+}
 
-const IMPORT_ERRORS: Record<ImportError, { title: string; text: string }> = {
-  invalido: {
-    title: 'No pudimos abrir ese zip.',
-    text: 'Puede estar dañado o traer enlaces simbólicos o rutas raras. Probá volver a comprimir la carpeta del proyecto.',
-  },
-  muchos: {
-    title: 'El zip trae demasiados archivos.',
-    text: 'Trae 812 y el máximo es 500. Probá quitar los .aux, .log y otros archivos que genera LaTeX.',
-  },
-  grande: {
-    title: 'El zip es demasiado grande.',
-    text: 'El máximo es 200 MB en total y 50 MB por archivo. Probá achicar las imágenes o sacar videos.',
-  },
-};
-
-export function ImportZipDialog({ open, onClose, demoError }: { open: boolean; onClose: () => void; demoError?: ImportError | null }) {
+export function ImportZipDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
+  const [name, setName] = useState('');
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const importZip = useImportProject();
+  const navigate = useNavigate();
   const close = () => {
     setFile(null);
+    setName('');
     setDragging(false);
+    importZip.reset();
     onClose();
+  };
+  const choose = (chosen: File | null | undefined) => {
+    if (!chosen) return;
+    setFile(chosen);
+    importZip.reset();
   };
   const onDrop = (event: DragEvent) => {
     event.preventDefault();
     setDragging(false);
-    const dropped = event.dataTransfer.files[0];
-    if (dropped) setFile(dropped);
+    choose(event.dataTransfer.files[0]);
   };
+  const failure = importZip.isError ? importError(importZip.error) : null;
   return (
     <Dialog
       open={open}
@@ -93,15 +110,25 @@ export function ImportZipDialog({ open, onClose, demoError }: { open: boolean; o
       footer={
         <>
           <Button onClick={close}>Cancelar</Button>
-          <Button variant="primary" disabled={!file} onClick={close}>
-            Importar
+          <Button
+            variant="primary"
+            disabled={!file || importZip.isPending}
+            onClick={() =>
+              file &&
+              importZip.mutate(
+                { file, ...(name.trim() ? { name: name.trim() } : {}) },
+                { onSuccess: (project) => navigate(`/proyectos/${project.id}`) },
+              )
+            }
+          >
+            {importZip.isPending ? 'Importando…' : 'Importar'}
           </Button>
         </>
       }
     >
-      {demoError && (
-        <Notice tone="error" title={IMPORT_ERRORS[demoError].title}>
-          {IMPORT_ERRORS[demoError].text}
+      {failure && (
+        <Notice tone="error" title={failure.title}>
+          {failure.text}
         </Notice>
       )}
       <button
@@ -139,16 +166,24 @@ export function ImportZipDialog({ open, onClose, demoError }: { open: boolean; o
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"
-        onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+        onChange={(event) => choose(event.target.files?.[0])}
       />
-      <TextField label="Nombre del proyecto" labelNote="(opcional)" placeholder="Si lo dejás vacío, usamos el nombre del zip" />
+      <TextField
+        label="Nombre del proyecto"
+        labelNote="(opcional)"
+        placeholder="Si lo dejás vacío, usamos el nombre del zip"
+        maxLength={NAME_MAX}
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+      />
       <p className="m-0 text-[13px] leading-normal text-muted">Hasta 500 archivos, 200 MB en total y 50 MB por archivo.</p>
     </Dialog>
   );
 }
 
-export function RenameProjectDialog({ name, open, onClose }: { name: string; open: boolean; onClose: () => void }) {
+export function RenameProjectDialog({ id, name, open, onClose }: { id: string; name: string; open: boolean; onClose: () => void }) {
   const [value, setValue] = useState(name);
+  const update = useUpdateProject(id);
   const valid = value.trim().length > 0 && value.trim().length <= NAME_MAX;
   return (
     <Dialog
@@ -158,13 +193,22 @@ export function RenameProjectDialog({ name, open, onClose }: { name: string; ope
       footer={
         <>
           <Button onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" disabled={!valid} onClick={onClose}>
+          <Button variant="primary" type="submit" form="rename-project" disabled={!valid || update.isPending}>
             Guardar
           </Button>
         </>
       }
     >
-      <TextField label="Nombre del proyecto" autoFocus value={value} maxLength={NAME_MAX} onChange={(event) => setValue(event.target.value)} />
+      {update.isError && <Notice tone="error" title="No pudimos renombrarlo">{errorMessage(update.error)}</Notice>}
+      <form
+        id="rename-project"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (valid) update.mutate({ name: value.trim() }, { onSuccess: onClose });
+        }}
+      >
+        <TextField label="Nombre del proyecto" data-autofocus value={value} maxLength={NAME_MAX} onChange={(event) => setValue(event.target.value)} />
+      </form>
     </Dialog>
   );
 }

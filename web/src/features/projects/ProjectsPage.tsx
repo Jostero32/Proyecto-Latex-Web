@@ -1,8 +1,7 @@
 // Mis proyectos: lista con buscador, rol y última modificación; crear, importar, descargar, renombrar
-// y borrar (estas dos, solo el dueño). Paso 1: datos de ejemplo.
-// `?estado=vacia|cargando|error` muestra esos estados; `?importar=invalido|muchos|grande`, el error de importar.
+// y borrar (estas dos, solo el dueño).
 import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Link } from 'react-router';
 import type { ProjectSummary } from '@latexweb/shared';
 import { AccountMenu } from '../../components/AccountMenu';
 import { Button, IconButton } from '../../components/Button';
@@ -11,25 +10,25 @@ import { Icon } from '../../components/Icon';
 import { Logo } from '../../components/Logo';
 import { Menu } from '../../components/Menu';
 import { RoleBadge } from '../../components/RoleBadge';
+import { Notice } from '../../components/Notice';
+import { download, errorMessage } from '../../lib/api';
 import { relativeTime } from '../../lib/format';
-import { PROJECTS } from '../../lib/mock';
+import { exportUrl, useDeleteProject, useProjects } from './api';
 import { ImportZipDialog, NewProjectDialog, RenameProjectDialog } from './ProjectDialogs';
 
 const COLUMNS = 'md:grid-cols-[minmax(0,1fr)_150px_190px_96px]';
 
 export function ProjectsPage() {
-  const [params] = useSearchParams();
-  const navigate = useNavigate();
-  const state = params.get('estado');
-  const importError = params.get('importar');
+  const list = useProjects();
+  const remove = useDeleteProject();
   const [query, setQuery] = useState('');
-  const [dialog, setDialog] = useState<'nuevo' | 'importar' | null>(importError ? 'importar' : null);
+  const [dialog, setDialog] = useState<'nuevo' | 'importar' | null>(null);
   const [renaming, setRenaming] = useState<ProjectSummary | null>(null);
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
 
-  const projects = state === 'vacia' ? [] : PROJECTS;
+  const projects = list.data ?? [];
   const filtered = projects.filter((p) => p.name.toLocaleLowerCase('es').includes(query.trim().toLocaleLowerCase('es')));
-  const loaded = state !== 'cargando' && state !== 'error';
+  const loaded = list.isSuccess;
 
   return (
     <div className="min-h-screen bg-bg">
@@ -47,7 +46,7 @@ export function ProjectsPage() {
           <div className="flex flex-col gap-1.5">
             <h1 className="m-0 font-serif text-[34px] leading-none font-medium tracking-tight sm:text-[44px]">Mis proyectos</h1>
             {loaded && projects.length > 0 && (
-              <p className="m-0 text-sm text-muted">{projects.length} proyectos, del más reciente al más antiguo</p>
+              <p className="m-0 text-sm text-muted">{projects.length === 1 ? '1 proyecto' : `${projects.length} proyectos`}, del más reciente al más antiguo</p>
             )}
           </div>
           <div className="flex flex-wrap gap-2.5">
@@ -60,8 +59,13 @@ export function ProjectsPage() {
           </div>
         </div>
 
-        {state === 'cargando' && <ListSkeleton />}
-        {state === 'error' && <ListError />}
+        {list.isPending && <ListSkeleton />}
+        {list.isError && <ListError message={errorMessage(list.error)} onRetry={() => void list.refetch()} />}
+        {remove.isError && (
+          <Notice tone="error" alert title="No pudimos borrar el proyecto">
+            {errorMessage(remove.error)}
+          </Notice>
+        )}
         {loaded && projects.length === 0 && <FirstTime onNew={() => setDialog('nuevo')} onImport={() => setDialog('importar')} />}
 
         {loaded && projects.length > 0 && (
@@ -111,17 +115,13 @@ export function ProjectsPage() {
         )}
       </main>
 
-      <NewProjectDialog open={dialog === 'nuevo'} onClose={() => setDialog(null)} onCreate={() => navigate('/proyectos/erosion')} />
-      <ImportZipDialog
-        open={dialog === 'importar'}
-        onClose={() => setDialog(null)}
-        demoError={importError === 'invalido' || importError === 'muchos' || importError === 'grande' ? importError : null}
-      />
-      {renaming && <RenameProjectDialog key={renaming.id} name={renaming.name} open onClose={() => setRenaming(null)} />}
+      <NewProjectDialog open={dialog === 'nuevo'} onClose={() => setDialog(null)} />
+      <ImportZipDialog open={dialog === 'importar'} onClose={() => setDialog(null)} />
+      {renaming && <RenameProjectDialog key={renaming.id} id={renaming.id} name={renaming.name} open onClose={() => setRenaming(null)} />}
       <ConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}
-        onConfirm={() => setDeleting(null)}
+        onConfirm={() => deleting && remove.mutate(deleting.id)}
         title="¿Borrar el proyecto?"
         confirmLabel="Borrar proyecto"
         confirmText={deleting?.name}
@@ -162,12 +162,20 @@ function ProjectRow({ project, first, onRename, onDelete }: ProjectRowProps) {
         </time>
       </div>
       <div className="col-start-2 row-span-2 row-start-1 flex justify-end gap-1 md:col-start-auto md:row-span-1 md:row-start-auto">
-        <IconButton icon="download" label={`Descargar ${project.name} como zip`} />
+        <a
+          href={exportUrl(project.id)}
+          download
+          aria-label={`Descargar ${project.name} como zip`}
+          title="Descargar como zip"
+          className="inline-flex size-10 flex-none items-center justify-center rounded-md text-muted hover:bg-surface-2 hover:text-text"
+        >
+          <Icon name="download" />
+        </a>
         {owner ? (
           <Menu
             items={[
               { label: 'Renombrar', icon: 'pencil', onSelect: onRename },
-              { label: 'Descargar como zip', icon: 'download' },
+              { label: 'Descargar como zip', icon: 'download', onSelect: () => download(exportUrl(project.id)) },
               { label: 'Borrar proyecto…', icon: 'trash', danger: true, separated: true, onSelect: onDelete },
             ]}
             trigger={(props) => <IconButton icon="more" label={`Más acciones para ${project.name}`} {...props} />}
@@ -240,14 +248,14 @@ function ListSkeleton() {
   );
 }
 
-function ListError() {
+function ListError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div role="alert" className="flex flex-col items-start gap-3 rounded-xl border border-border bg-surface p-6">
       <span className="flex items-center gap-2 text-[15px] font-semibold text-error">
         <Icon name="error" /> No pudimos cargar tus proyectos
       </span>
-      <p className="m-0 text-sm text-muted">Puede ser la conexión o un problema nuestro. Tus proyectos están a salvo.</p>
-      <Button size="sm" icon="sync">
+      <p className="m-0 text-sm text-muted">{message} Tus proyectos están a salvo.</p>
+      <Button size="sm" icon="sync" onClick={onRetry}>
         Reintentar
       </Button>
     </div>

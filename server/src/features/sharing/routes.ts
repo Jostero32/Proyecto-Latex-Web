@@ -87,6 +87,39 @@ export async function sharingRoutes(app: FastifyInstance, { db, sharing }: Shari
     },
   );
 
+  app.get<{ Params: { token: string } }>(
+    '/share/:token',
+    {
+      schema: {
+        tags,
+        summary: 'Ver qué proyecto y rol da un enlace, sin unirse',
+        description: 'Del dueño se muestra solo el nombre. `currentRole`: mi rol si ya soy miembro.',
+        params: idParams('token'),
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              preview: {
+                type: 'object',
+                properties: {
+                  projectId: { type: 'string', format: 'uuid' },
+                  projectName: { type: 'string' },
+                  ownerName: { type: ['string', 'null'] },
+                  role,
+                  currentRole: { type: ['string', 'null'] },
+                },
+                required: ['projectId', 'projectName', 'ownerName', 'role', 'currentRole'],
+              },
+            },
+            required: ['preview'],
+          },
+          ...errors,
+        },
+      },
+    },
+    async (request) => ({ preview: await sharing.preview(currentUserId(request), request.params.token) }),
+  );
+
   app.post<{ Params: { token: string } }>(
     '/share/:token/join',
     {

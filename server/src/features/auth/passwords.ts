@@ -1,9 +1,10 @@
 // Contraseñas y emails: validación, normalización y hash. Ver docs/specs/auth.md.
 import { hash, verify } from '@node-rs/argon2';
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '@latexweb/shared';
 
-export const PASSWORD_MIN = 10;
+export const PASSWORD_MIN = PASSWORD_MIN_LENGTH;
 /** Máximo: argon2 es caro y no tiene sentido hashear entradas enormes. */
-export const PASSWORD_MAX = 256;
+export const PASSWORD_MAX = PASSWORD_MAX_LENGTH;
 export const EMAIL_MAX = 254;
 
 /** Algoritmo argon2id (`algorithm: 2`), con los parámetros por defecto de @node-rs/argon2. */

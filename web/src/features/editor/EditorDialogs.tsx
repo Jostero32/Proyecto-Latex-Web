@@ -22,10 +22,12 @@ interface SettingsDialogProps {
   mainFile: string;
   engine: Engine;
   texFiles: string[];
-  onSave: (settings: { mainFile: string; engine: Engine }) => void;
+  saving: boolean;
+  onSave: (settings: { name?: string; mainFile: string; engine: Engine }) => void;
 }
 
-export function SettingsDialog({ open, onClose, name, isOwner, mainFile, engine, texFiles, onSave }: SettingsDialogProps) {
+export function SettingsDialog({ open, onClose, name, isOwner, mainFile, engine, texFiles, saving, onSave }: SettingsDialogProps) {
+  const [newName, setNewName] = useState(name);
   const [main, setMain] = useState(mainFile);
   const [chosen, setChosen] = useState(engine);
   return (
@@ -39,17 +41,22 @@ export function SettingsDialog({ open, onClose, name, isOwner, mainFile, engine,
           <Button onClick={onClose}>Cancelar</Button>
           <Button
             variant="primary"
-            onClick={() => {
-              onSave({ mainFile: main, engine: chosen });
-              onClose();
-            }}
+            disabled={saving || (isOwner && !newName.trim())}
+            onClick={() => onSave({ ...(isOwner && newName.trim() !== name ? { name: newName.trim() } : {}), mainFile: main, engine: chosen })}
           >
-            Guardar
+            {saving ? 'Guardando…' : 'Guardar'}
           </Button>
         </>
       }
     >
-      <TextField label="Nombre" defaultValue={name} disabled={!isOwner} hint={isOwner ? undefined : 'Solo el dueño cambia el nombre.'} />
+      <TextField
+        label="Nombre"
+        value={newName}
+        maxLength={120}
+        onChange={(event) => setNewName(event.target.value)}
+        disabled={!isOwner}
+        hint={isOwner ? undefined : 'Solo el dueño cambia el nombre.'}
+      />
       <SelectField label="Documento principal" value={main} onChange={(event) => setMain(event.target.value)} hint="El archivo que se compila.">
         {texFiles.map((path) => (
           <option key={path} value={path}>
@@ -124,12 +131,52 @@ export function NewFileDialog({ open, onClose, existing, onCreate }: { open: boo
       >
         <TextField
           label="Nombre o ruta"
-          autoFocus
+          data-autofocus
           value={path}
           onChange={(event) => setPath(event.target.value)}
           placeholder="capitulos/conclusiones.tex"
           error={error}
           hint={error ? 'Por ejemplo: capitulos/conclusiones.tex' : 'Para crearlo en una carpeta, escribí la ruta: capitulos/conclusiones.tex'}
+        />
+      </form>
+    </Dialog>
+  );
+}
+
+/** Renombrar o mover: la ruta completa, con carpetas. */
+export function RenameFileDialog({ path, existing, onClose, onRename }: { path: string; existing: string[]; onClose: () => void; onRename: (path: string) => void }) {
+  const [value, setValue] = useState(path);
+  const check = normalizeProjectPath(value);
+  const taken = check.ok && check.path.toLowerCase() !== path.toLowerCase() && existing.some((p) => p.toLowerCase() === check.path.toLowerCase());
+  const error = !check.ok ? PATH_ERRORS[check.reason] : taken ? 'Ya hay un archivo con ese nombre.' : null;
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="Renombrar o mover"
+      footer={
+        <>
+          <Button onClick={onClose}>Cancelar</Button>
+          <Button variant="primary" type="submit" form="rename-file" disabled={Boolean(error) || (check.ok && check.path === path)}>
+            Guardar
+          </Button>
+        </>
+      }
+    >
+      <form
+        id="rename-file"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (check.ok && !taken) onRename(check.path);
+        }}
+      >
+        <TextField
+          label="Ruta"
+          data-autofocus
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          error={error}
+          hint="Para moverlo, cambiá la carpeta: figuras/diagrama.png"
         />
       </form>
     </Dialog>
@@ -164,7 +211,7 @@ export function FileSearchDialog({ open, onClose, files, onOpen }: { open: boole
       <div className="relative">
         <Icon name="search" className="pointer-events-none absolute top-[13px] left-[13px] text-muted" />
         <input
-          autoFocus
+          data-autofocus
           role="combobox"
           aria-expanded="true"
           aria-controls="file-search-results"

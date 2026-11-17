@@ -183,6 +183,9 @@ services:
       context: .
       target: web
     image: latexweb-web:dev
+    environment:
+      # vite preview reenvía /api y /collab al server (un solo origen para el navegador).
+      API_PROXY_TARGET: http://server:3000
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=64m
       # `vite preview` compila vite.config.ts aquí al arrancar.

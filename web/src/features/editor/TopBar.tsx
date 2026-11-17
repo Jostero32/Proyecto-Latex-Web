@@ -22,13 +22,14 @@ interface TopBarProps {
   onShare: () => void;
   onSettings: () => void;
   onDelete: () => void;
+  onDownload: () => void;
 }
 
-export function TopBar({ name, role, connection, presence, onRename, onShare, onSettings, onDelete }: TopBarProps) {
+export function TopBar({ name, role, connection, presence, onRename, onShare, onSettings, onDelete, onDownload }: TopBarProps) {
   const [editing, setEditing] = useState(false);
   const owner = role === 'owner';
   const menu: MenuItem[] = [
-    { label: 'Descargar como zip', icon: 'download' },
+    { label: 'Descargar como zip', icon: 'download', onSelect: onDownload },
     ...(role !== 'viewer' ? [{ label: 'Ajustes del proyecto', icon: 'settings' as const, onSelect: onSettings }] : []),
     ...(owner ? [{ label: 'Borrar proyecto…', icon: 'trash' as const, danger: true, separated: true, onSelect: onDelete }] : []),
   ];

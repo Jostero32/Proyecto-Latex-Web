@@ -1,5 +1,6 @@
 // Diálogo modal con <dialog>: el navegador atrapa el foco, cierra con Esc y lo devuelve al control que
-// lo abrió. El foco inicial va al primer elemento con `autoFocus` (en las confirmaciones, Cancelar).
+// lo abrió. El foco inicial va al elemento con `data-autofocus` (en las confirmaciones, Cancelar):
+// `autoFocus` no sirve, porque React enfoca antes de que showModal() mueva el foco al primer botón.
 import { useEffect, useRef, type ReactNode } from 'react';
 import { IconButton } from './Button';
 
@@ -23,7 +24,10 @@ export function Dialog({ open, onClose, title, subtitle, width = 'sm', children,
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
+    if (open && !dialog.open) {
+      dialog.showModal();
+      dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus();
+    }
     if (!open && dialog.open) dialog.close();
   }, [open]);
 

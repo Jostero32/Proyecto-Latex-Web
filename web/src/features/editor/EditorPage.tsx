@@ -1,32 +1,29 @@
 // Editor: archivos a la izquierda, código al centro, PDF a la derecha y el panel de problemas abajo. Los
-// costados se ocultan (queda un riel) y se redimensionan. Paso 1 de docs/specs/frontend.md: datos de
-// ejemplo y una compilación simulada.
-//   ?vista=exito|errores|lector        los tres estados del diseño
+// costados se ocultan (queda un riel) y se redimensionan. Proyecto, árbol y archivos vienen de la API; el
+// texto todavía se ve sin editar (paso 3: CodeMirror y Yjs) y la compilación es simulada (paso 4).
+// Demos de lo que falta conectar:
+//   ?vista=exito|errores                  el documento, colaboradores y resultados del diseño
 //   ?aviso=permisos|sin-acceso|sin-conexion|doc-grande
-//   ?compilar=timeout|fallo|cola|grande  qué devuelve la próxima compilación
+//   ?compilar=timeout|fallo|cola|grande   qué devuelve la próxima compilación simulada
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import type { Diagnostic, Engine, ProjectFile } from '@latexweb/shared';
+import type { Diagnostic, Engine, ProjectFile, ProjectSummary, UpdateProjectRequest } from '@latexweb/shared';
+import { FullScreenError, FullScreenLoading } from '../../app/RequireAuth';
+import { COLLABORATOR_COLORS, type Presence } from '../../components/Avatar';
 import { Button, IconButton } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Icon } from '../../components/Icon';
 import { Notice } from '../../components/Notice';
+import { download, errorMessage, isApiError } from '../../lib/api';
 import { formatBytes } from '../../lib/format';
-import {
-  DIAGNOSTICS_ERRORS,
-  DIAGNOSTICS_SUCCESS,
-  DOCUMENT,
-  DOCUMENT_WITH_ERRORS,
-  FILE_CONTENTS,
-  FILES,
-  findProject,
-  PRESENCE,
-  REMOTE_CURSORS,
-} from '../../lib/mock';
+import { DIAGNOSTICS_ERRORS, DIAGNOSTICS_SUCCESS, DOCUMENT, DOCUMENT_WITH_ERRORS, PRESENCE, REMOTE_CURSORS } from '../../lib/mock';
+import { useCurrentUser } from '../auth/api';
+import { exportUrl, useDeleteProject, useProject, useUpdateProject } from '../projects/api';
 import { ShareDialog } from '../sharing/ShareDialog';
+import { fileUrl, useDeleteFile, useFiles, useFileText, useRenameFile, useUploadFiles, type Upload } from './api';
 import { CodeView } from './CodeView';
-import { FileSearchDialog, LogDialog, NewFileDialog, SettingsDialog } from './EditorDialogs';
-import { FileTree, ImagePlaceholder } from './FileTree';
+import { FileSearchDialog, LogDialog, NewFileDialog, RenameFileDialog, SettingsDialog } from './EditorDialogs';
+import { FileTree } from './FileTree';
 import { PdfPane, type CompilePhase, type CompileResult } from './PdfPane';
 import { ProblemsPanel } from './ProblemsPanel';
 import { TopBar, type Connection } from './TopBar';
@@ -43,50 +40,90 @@ function culprit(message: string): string | undefined {
   return message.match(/`([^']+)\.sty'/)?.[1] ?? message.match(/\\[a-zA-Z@]+/g)?.at(-1);
 }
 
+/** Mensaje de un error al cambiar archivos o el proyecto. */
+function changeError(error: unknown): string {
+  if (isApiError(error, 'path_conflict')) return 'Ya hay un archivo con esa ruta.';
+  if (isApiError(error, 'file_too_large')) return 'El archivo supera los 50 MB.';
+  if (isApiError(error, 'project_too_large') || isApiError(error, 'payload_too_large')) return 'El proyecto superaría los 200 MB.';
+  if (isApiError(error, 'too_many_files')) return 'El proyecto superaría los 500 archivos.';
+  if (isApiError(error, 'invalid_main_file')) return 'El documento principal tiene que ser un .tex del proyecto.';
+  return errorMessage(error);
+}
+
 export function EditorPage() {
-  const { id } = useParams();
+  const { id = '' } = useParams();
+  const project = useProject(id);
+  const files = useFiles(id);
+  if (project.isPending || (project.isSuccess && files.isPending)) return <FullScreenLoading />;
+  if (project.isError) {
+    return isApiError(project.error, 'not_found') ? (
+      <NoAccess title="Este proyecto no existe o no tenés acceso" text="Puede que lo hayan borrado o que te hayan quitado del proyecto." />
+    ) : (
+      <FullScreenError message={errorMessage(project.error)} onRetry={() => void project.refetch()} />
+    );
+  }
+  if (files.isError) return <FullScreenError message={errorMessage(files.error)} onRetry={() => void files.refetch()} />;
+  return <Editor project={project.data} files={files.data ?? []} />;
+}
+
+function Editor({ project, files }: { project: ProjectSummary; files: ProjectFile[] }) {
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const project = findProject(id);
-  const view = pick(params.get('vista'), ['exito', 'errores', 'lector'] as const, 'exito');
+  const me = useCurrentUser();
+  const demo = pick<'exito' | 'errores' | 'ninguna'>(params.get('vista'), ['exito', 'errores'], 'ninguna');
   const notice = pick<Banner | 'ninguno'>(params.get('aviso'), ['permisos', 'sin-acceso', 'sin-conexion', 'doc-grande'], 'ninguno');
   const demoCompile = params.get('compilar');
-  const errorsView = view === 'errores';
-  const role = view === 'lector' ? 'viewer' : project.role;
+  const errorsView = demo === 'errores';
+  const role = project.role;
   const canEdit = role !== 'viewer';
+  const id = project.id;
 
-  const [name, setName] = useState(project.name);
-  const [files, setFiles] = useState<ProjectFile[]>(FILES);
-  const [mainFile, setMainFile] = useState(project.mainFile);
-  const [engine, setEngine] = useState<Engine>(project.engine);
-  const [tabs, setTabs] = useState(['main.tex', 'capitulos/introduccion.tex', 'referencias.bib']);
-  const [active, setActive] = useState<string | null>('main.tex');
+  const update = useUpdateProject(id);
+  const upload = useUploadFiles(id);
+  const renameFile = useRenameFile(id);
+  const deleteFile = useDeleteFile(id);
+  const deleteProject = useDeleteProject();
+  const [failure, setFailure] = useState<string | null>(null);
+  const onError = (error: unknown) => setFailure(changeError(error));
+
+  const [openTabs, setOpenTabs] = useState<string[]>(() => [project.mainFile]);
+  const [active, setActive] = useState<string | null>(project.mainFile);
   const [left, setLeft] = useState({ open: true, width: 248 });
   // El PDF ocupa 560 px en 1440; en pantallas más chicas, menos, para que el código no quede angosto.
   const [right, setRight] = useState(() => ({ open: true, width: Math.round(Math.min(560, Math.max(380, window.innerWidth * 0.36))) }));
-  const [minimap, setMinimap] = useState(view === 'exito');
+  const [minimap, setMinimap] = useState(demo === 'exito');
   const [dialog, setDialog] = useState<Dialogs>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<ProjectFile | null>(null);
+  const [renaming, setRenaming] = useState<ProjectFile | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
 
   const [phase, setPhase] = useState<CompilePhase>('idle');
   const [seconds, setSeconds] = useState(0);
   const [result, setResult] = useState<CompileResult | null>(
-    errorsView ? { status: 'error', durationMs: 3100, errorCount: 2 } : { status: 'success', durationMs: 2400, errorCount: 0 },
+    errorsView ? { status: 'error', durationMs: 3100, errorCount: 2 } : demo === 'exito' ? { status: 'success', durationMs: 2400, errorCount: 0 } : null,
   );
-  const [diagnostics, setDiagnostics] = useState<Diagnostic[] | null>(errorsView ? DIAGNOSTICS_ERRORS : DIAGNOSTICS_SUCCESS);
+  const [diagnostics, setDiagnostics] = useState<Diagnostic[] | null>(errorsView ? DIAGNOSTICS_ERRORS : demo === 'exito' ? DIAGNOSTICS_SUCCESS : null);
+  // Las demos arrancan con un PDF bueno de antes; una compilación con errores lo deja atenuado.
+  const [hasPdf, setHasPdf] = useState(demo !== 'ninguna');
   const [problemsOpen, setProblemsOpen] = useState(errorsView);
   const [selected, setSelected] = useState<number | null>(errorsView ? 0 : null);
   const [jumpLine, setJumpLine] = useState<number | null>(errorsView ? 28 : null);
   const [syncLine, setSyncLine] = useState<number | null>(null);
-  // Las tres vistas arrancan con un PDF bueno de antes; una compilación con errores lo deja atenuado.
-  const [hasPdf, setHasPdf] = useState(true);
-  const [cursor, setCursor] = useState(errorsView ? { line: 28, column: 39 } : { line: 26, column: 38 });
+  const [cursor, setCursor] = useState<{ line: number; column: number } | null>(
+    errorsView ? { line: 28, column: 39 } : demo === 'exito' ? { line: 26, column: 38 } : null,
+  );
 
   const connection: Connection = notice === 'sin-conexion' ? 'sin-conexion' : errorsView ? 'sincronizando' : 'guardado';
   const tree = useMemo(() => buildTree(files), [files]);
-  const activeFile = files.find((f) => f.path === active) ?? null;
+  const paths = useMemo(() => new Set(files.map((f) => f.path)), [files]);
+  // Una pestaña de un archivo borrado o movido por otra persona desaparece sola.
+  const tabs = openTabs.filter((path) => paths.has(path));
+  const activePath = active && paths.has(active) ? active : (tabs.at(-1) ?? null);
+  const activeFile = files.find((f) => f.path === activePath) ?? null;
+  const usesDemoDocument = demo !== 'ninguna' && activePath === project.mainFile;
+  const text = useFileText(id, usesDemoDocument ? null : activeFile);
 
-  // Compilación simulada: en cola → compilando (con el tiempo corriendo) → resultado.
+  // Compilación simulada (paso 4): en cola → compilando (con el tiempo corriendo) → resultado.
   const compile = useCallback(() => {
     if (phase !== 'idle') return;
     setSyncLine(null);
@@ -118,8 +155,8 @@ export function EditorPage() {
           setDiagnostics(DIAGNOSTICS_ERRORS);
         } else {
           setResult({ status: 'success', durationMs: 1800, errorCount: 0 });
+          setDiagnostics(demo === 'exito' ? DIAGNOSTICS_SUCCESS : []);
           setHasPdf(true);
-          setDiagnostics(DIAGNOSTICS_SUCCESS);
         }
       }, 2300);
       return () => {
@@ -131,7 +168,7 @@ export function EditorPage() {
       const tick = setInterval(() => setSeconds((s) => s - 1), 1000);
       return () => clearInterval(tick);
     }
-  }, [phase, demoCompile, errorsView]);
+  }, [phase, demoCompile, errorsView, demo]);
 
   useEffect(() => {
     if (phase === 'busy' && seconds <= 0) {
@@ -158,7 +195,7 @@ export function EditorPage() {
   }, [compile]);
 
   const openFile = (path: string, line: number | null = null) => {
-    if (!tabs.includes(path)) setTabs([...tabs, path]);
+    if (!tabs.includes(path)) setOpenTabs([...tabs, path]);
     setActive(path);
     setJumpLine(line);
     if (line) setCursor({ line, column: 0 });
@@ -166,40 +203,67 @@ export function EditorPage() {
 
   const closeTab = (path: string) => {
     const next = tabs.filter((t) => t !== path);
-    setTabs(next);
-    if (active === path) setActive(next.at(-1) ?? null);
+    setOpenTabs(next);
+    if (activePath === path) setActive(next.at(-1) ?? null);
+  };
+
+  const sendUploads = (uploads: Upload[], open?: string) => {
+    if (uploads.length === 0) return;
+    setFailure(null);
+    upload.mutate(uploads, { onSuccess: () => open && openFile(open), onError });
+  };
+
+  const saveProject = (changes: UpdateProjectRequest, onSuccess?: () => void) => {
+    setFailure(null);
+    update.mutate(changes, { onSuccess, onError });
   };
 
   const lines = useMemo(() => {
-    if (!active) return [];
-    if (active === 'main.tex') return errorsView ? DOCUMENT_WITH_ERRORS : DOCUMENT;
-    return FILE_CONTENTS[active] ?? [''];
-  }, [active, errorsView]);
+    if (usesDemoDocument) return errorsView ? DOCUMENT_WITH_ERRORS : DOCUMENT;
+    return text.data?.split('\n') ?? [];
+  }, [usesDemoDocument, errorsView, text.data]);
 
   const errorLines = useMemo(() => {
     const map = new Map<number, string | undefined>();
     if (result?.status !== 'error' || phase !== 'idle') return map;
-    for (const d of diagnostics ?? []) if (d.level === 'error' && d.file === active && d.line) map.set(d.line, culprit(d.message));
+    for (const d of diagnostics ?? []) if (d.level === 'error' && d.file === activePath && d.line) map.set(d.line, culprit(d.message));
     return map;
-  }, [diagnostics, active, result, phase]);
+  }, [diagnostics, activePath, result, phase]);
 
-  const remoteCursors = active === 'main.tex' ? (errorsView ? REMOTE_CURSORS.slice(0, 1) : REMOTE_CURSORS) : [];
-  const presence = errorsView ? PRESENCE.slice(0, 2) : PRESENCE;
+  const you: Presence = { name: me.name, email: me.email, color: COLLABORATOR_COLORS[0], you: true };
+  const presence = demo === 'ninguna' ? [you] : [you, ...PRESENCE.slice(0, errorsView ? 1 : 2)];
+  const remoteCursors = usesDemoDocument ? (errorsView ? REMOTE_CURSORS.slice(0, 1) : REMOTE_CURSORS) : [];
 
-  if (notice === 'sin-acceso') return <NoAccess />;
+  if (notice === 'sin-acceso') return <NoAccess title="Ya no tenés acceso a este proyecto" text="El dueño te quitó del proyecto o lo borró. Si creés que es un error, escribile." />;
 
   return (
     <div className="flex h-screen min-h-[520px] flex-col overflow-hidden bg-bg text-sm">
       <TopBar
-        name={name}
+        name={project.name}
         role={role}
         connection={connection}
         presence={presence}
-        onRename={setName}
+        onRename={(name) => saveProject({ name })}
         onShare={() => setDialog('share')}
         onSettings={() => setDialog('settings')}
         onDelete={() => setDialog('delete-project')}
+        onDownload={() => download(exportUrl(id))}
       />
+      {failure && (
+        <Notice
+          tone="error"
+          alert
+          title="No se pudo hacer el cambio"
+          className="rounded-none border-b border-border"
+          actions={
+            <Button size="sm" variant="ghost" onClick={() => setFailure(null)}>
+              Cerrar
+            </Button>
+          }
+        >
+          {failure}
+        </Notice>
+      )}
       {notice === 'permisos' && (
         <Notice tone="info" alert title="Tus permisos cambiaron" className="rounded-none border-b border-border">
           Ahora sos Lector en este proyecto. Recargamos el editor para que puedas seguir mirando y compilando.
@@ -216,21 +280,39 @@ export function EditorPage() {
         </Notice>
       )}
 
+      <input
+        ref={picker}
+        type="file"
+        multiple
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => {
+          sendUploads([...(event.target.files ?? [])].map((file) => ({ path: file.name, data: file })));
+          event.target.value = '';
+        }}
+      />
+
       <div className="flex min-h-0 flex-1">
         {left.open ? (
           <>
             <div style={{ width: left.width }} className="flex-none">
               <FileTree
                 nodes={tree}
-                activePath={active}
-                mainFile={mainFile}
+                activePath={activePath}
+                mainFile={project.mainFile}
                 canEdit={canEdit}
+                uploading={upload.isPending}
+                fileUrl={(file) => fileUrl(id, file.id)}
                 onOpen={(path) => openFile(path)}
                 onHide={() => setLeft({ ...left, open: false })}
                 onSearch={() => setDialog('search')}
                 onNewFile={() => setDialog('new-file')}
+                onPickFiles={() => picker.current?.click()}
+                onDropFiles={(folder, dropped) => sendUploads(dropped.map((file) => ({ path: folder ? `${folder}/${file.name}` : file.name, data: file })))}
+                onRename={setRenaming}
                 onDelete={setDeleting}
-                onSetMain={setMainFile}
+                onSetMain={(path) => saveProject({ mainFile: path })}
               />
             </div>
             <Resizer label="Ancho del árbol de archivos" value={left.width} min={180} max={420} onChange={(width) => setLeft({ ...left, width })} />
@@ -242,27 +324,39 @@ export function EditorPage() {
         )}
 
         <section aria-label="Editor de código" className="@container flex min-w-0 flex-1 flex-col bg-surface">
-          <Tabs tabs={tabs} active={active} readOnly={!canEdit} onSelect={(path) => openFile(path)} onClose={closeTab} />
-          {canEdit ? (
-            <FormatBar minimap={minimap} onMinimap={() => setMinimap(!minimap)} onSync={() => setSyncLine(cursor.line)} />
+          <Tabs tabs={tabs} active={activePath} readOnly={!canEdit} onSelect={(path) => openFile(path)} onClose={closeTab} />
+          {activeFile?.kind === 'binary' ? null : canEdit ? (
+            <FormatBar minimap={minimap} onMinimap={() => setMinimap(!minimap)} onSync={() => setSyncLine(cursor?.line ?? 1)} />
           ) : (
             <div role="note" className="flex h-11 flex-none items-center gap-2.5 border-b border-border bg-surface-2 px-3.5 text-[13.5px]">
               <Icon name="eye" size={16} />
               <strong className="font-semibold">Estás en modo lectura.</strong>
               <span className="hidden text-muted md:inline">Podés compilar y descargar, pero no editar.</span>
               <span className="flex-1" />
-              <SyncButton onClick={() => setSyncLine(cursor.line)} />
+              <SyncButton onClick={() => setSyncLine(cursor?.line ?? 1)} />
             </div>
           )}
           {activeFile?.kind === 'binary' ? (
-            <BinaryView file={activeFile} />
-          ) : active ? (
+            <BinaryView file={activeFile} url={fileUrl(id, activeFile.id)} />
+          ) : activePath && text.isError ? (
+            <div className="flex flex-1 items-start p-6">
+              <Notice tone="error" title="No pudimos abrir el archivo" actions={<Button size="sm" icon="sync" onClick={() => void text.refetch()}>Reintentar</Button>}>
+                {errorMessage(text.error)}
+              </Notice>
+            </div>
+          ) : activePath && text.isLoading ? (
+            <div aria-busy="true" className="flex flex-1 flex-col gap-2.5 p-5">
+              {[60, 45, 70, 30, 55].map((width, index) => (
+                <span key={index} className="h-3 animate-pulse rounded bg-surface-2" style={{ width: `${width}%` }} />
+              ))}
+            </div>
+          ) : activePath ? (
             <CodeView
-              path={active}
+              path={activePath}
               lines={lines}
               errors={errorLines}
               jumpLine={jumpLine}
-              cursor={active === 'main.tex' ? cursor : null}
+              cursor={activePath === project.mainFile ? cursor : null}
               remoteCursors={remoteCursors}
               readOnly={!canEdit || notice === 'doc-grande'}
               minimap={minimap && canEdit}
@@ -277,9 +371,9 @@ export function EditorPage() {
             selected={selected}
             onSelect={(index, d) => {
               setSelected(index);
-              if (d.file && d.line && files.some((f) => f.path === d.file)) openFile(d.file, d.line);
+              if (d.file && d.line && paths.has(d.file)) openFile(d.file, d.line);
             }}
-            cursor={active === 'main.tex' ? cursor : null}
+            cursor={activePath === project.mainFile ? cursor : null}
             onShowLog={() => setDialog('log')}
           />
         </section>
@@ -293,17 +387,18 @@ export function EditorPage() {
                 seconds={seconds}
                 result={result}
                 hasPdf={hasPdf}
-                engine={engine}
+                sample={demo === 'ninguna'}
+                engine={project.engine}
                 canChangeEngine={canEdit}
                 syncLine={syncLine}
                 onCompile={compile}
-                onEngine={setEngine}
+                onEngine={(engine: Engine) => saveProject({ engine })}
                 onHide={() => setRight({ ...right, open: false })}
                 onShowProblems={() => setProblemsOpen(true)}
                 onShowLog={() => setDialog('log')}
                 onJumpToLine={(line) => {
                   setSyncLine(line);
-                  openFile('main.tex', line);
+                  openFile(project.mainFile, line);
                 }}
               />
             </div>
@@ -325,41 +420,60 @@ export function EditorPage() {
         )}
       </div>
 
-      {role === 'owner' && <ShareDialog open={dialog === 'share'} onClose={() => setDialog(null)} projectName={name} />}
+      {role === 'owner' && <ShareDialog open={dialog === 'share'} onClose={() => setDialog(null)} projectId={id} projectName={project.name} />}
       {dialog === 'settings' && (
         <SettingsDialog
           open
           onClose={() => setDialog(null)}
-          name={name}
+          name={project.name}
           isOwner={role === 'owner'}
-          mainFile={mainFile}
-          engine={engine}
-          texFiles={files.filter((f) => f.path.endsWith('.tex')).map((f) => f.path)}
-          onSave={(settings) => {
-            setMainFile(settings.mainFile);
-            setEngine(settings.engine);
-          }}
+          mainFile={project.mainFile}
+          engine={project.engine}
+          texFiles={files.filter((f) => /\.tex$/i.test(f.path)).map((f) => f.path)}
+          saving={update.isPending}
+          onSave={(changes) => saveProject(changes, () => setDialog(null))}
         />
       )}
       <NewFileDialog
         open={dialog === 'new-file'}
         onClose={() => setDialog(null)}
         existing={files.map((f) => f.path)}
-        onCreate={(path) => {
-          setFiles([...files, { id: path, path, kind: 'text', size: 0, updatedAt: new Date().toISOString() }]);
-          openFile(path);
-        }}
+        onCreate={(path) => sendUploads([{ path, data: new Blob([], { type: 'text/plain' }) }], path)}
       />
+      {renaming && (
+        <RenameFileDialog
+          path={renaming.path}
+          existing={files.map((f) => f.path)}
+          onClose={() => setRenaming(null)}
+          onRename={(path) => {
+            const from = renaming.path;
+            setFailure(null);
+            renameFile.mutate(
+              { fileId: renaming.id, path },
+              {
+                onSuccess: () => {
+                  setOpenTabs(tabs.map((t) => (t === from ? path : t)));
+                  if (activePath === from) setActive(path);
+                },
+                onError,
+              },
+            );
+            setRenaming(null);
+          }}
+        />
+      )}
       <FileSearchDialog open={dialog === 'search'} onClose={() => setDialog(null)} files={files} onOpen={(path) => openFile(path)} />
       <LogDialog open={dialog === 'log'} onClose={() => setDialog(null)} />
       <ConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}
         onConfirm={() => {
-          setFiles(files.filter((f) => f.path !== deleting));
-          if (deleting) closeTab(deleting);
+          if (!deleting) return;
+          const path = deleting.path;
+          setFailure(null);
+          deleteFile.mutate(deleting.id, { onSuccess: () => closeTab(path), onError });
         }}
-        title={`¿Borrar ${deleting ? baseName(deleting) : ''}?`}
+        title={`¿Borrar ${deleting ? baseName(deleting.path) : ''}?`}
         confirmLabel="Borrar archivo"
       >
         Se borra para todos los miembros del proyecto. No se puede deshacer.
@@ -367,10 +481,10 @@ export function EditorPage() {
       <ConfirmDialog
         open={dialog === 'delete-project'}
         onClose={() => setDialog(null)}
-        onConfirm={() => navigate('/')}
+        onConfirm={() => deleteProject.mutate(id, { onSuccess: () => navigate('/', { replace: true }), onError })}
         title="¿Borrar el proyecto?"
         confirmLabel="Borrar proyecto"
-        confirmText={name}
+        confirmText={project.name}
       >
         Se borran todos sus archivos y compilaciones, también para los demás miembros. No se puede deshacer.
       </ConfirmDialog>
@@ -482,11 +596,11 @@ function SyncButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function BinaryView({ file }: { file: ProjectFile }) {
+function BinaryView({ file, url }: { file: ProjectFile; url: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-auto bg-bg p-8">
       {isImage(file.path) ? (
-        <ImagePlaceholder className="h-[280px] w-full max-w-[420px]" />
+        <img src={url} alt={baseName(file.path)} className="max-h-[60vh] max-w-full rounded-md border border-border bg-white object-contain" />
       ) : (
         <div className="flex h-40 w-32 items-center justify-center rounded border-[1.5px] border-dashed border-border-input text-muted">
           <Icon name={fileIcon(file.path)} size={32} strokeWidth={1.4} />
@@ -499,7 +613,7 @@ function BinaryView({ file }: { file: ProjectFile }) {
           {isImage(file.path) ? '' : ' · Vista previa no disponible'}
         </span>
       </div>
-      <Button size="sm" icon="download">
+      <Button size="sm" icon="download" onClick={() => download(url)}>
         Descargar
       </Button>
     </div>
@@ -545,15 +659,15 @@ function Resizer({ label, value, min, max, invert = false, onChange }: { label: 
   );
 }
 
-function NoAccess() {
+function NoAccess({ title, text }: { title: string; text: string }) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-bg px-4">
       <div role="alert" className="flex max-w-[440px] flex-col items-start gap-4 rounded-2xl border border-border bg-surface p-8 shadow-pop">
         <span className="flex size-12 items-center justify-center rounded-full bg-surface-2 text-muted">
           <Icon name="lock" size={22} />
         </span>
-        <h1 className="m-0 font-serif text-3xl font-medium">Ya no tenés acceso a este proyecto</h1>
-        <p className="m-0 text-[15px] leading-relaxed text-muted">El dueño te quitó del proyecto o lo borró. Si creés que es un error, escribile.</p>
+        <h1 className="m-0 font-serif text-3xl font-medium">{title}</h1>
+        <p className="m-0 text-[15px] leading-relaxed text-muted">{text}</p>
         <Link to="/" className="flex h-11 items-center rounded-md bg-accent px-4 text-sm font-semibold text-on-accent no-underline">
           Ir a mis proyectos
         </Link>

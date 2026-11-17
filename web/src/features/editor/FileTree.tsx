@@ -1,10 +1,12 @@
 // Árbol de archivos: carpetas plegables, ícono por tipo, estrella en el documento principal, vista previa
 // de imágenes al pasar el mouse y menú por archivo (también con clic derecho). Los lectores solo abren y
-// descargan. Arrastrar archivos marca la carpeta destino (la subida llega en el paso 3).
+// descargan. Arrastrar archivos a una carpeta (o al árbol) los sube ahí.
 import { useState, type DragEvent, type MouseEvent } from 'react';
+import type { ProjectFile } from '@latexweb/shared';
 import { IconButton } from '../../components/Button';
 import { Icon } from '../../components/Icon';
 import { Menu, type MenuItem } from '../../components/Menu';
+import { download } from '../../lib/api';
 import { formatBytes, MOD_KEY } from '../../lib/format';
 import { fileIcon, isImage, type FileNode, type TreeNode } from './tree';
 
@@ -13,16 +15,23 @@ interface FileTreeProps {
   activePath: string | null;
   mainFile: string;
   canEdit: boolean;
+  /** Hay una subida en curso. */
+  uploading: boolean;
+  fileUrl: (file: ProjectFile) => string;
   onOpen: (path: string) => void;
   onHide: () => void;
   onSearch: () => void;
   onNewFile: () => void;
-  onDelete: (path: string) => void;
+  onPickFiles: () => void;
+  onDropFiles: (folder: string, files: File[]) => void;
+  onRename: (file: ProjectFile) => void;
+  onDelete: (file: ProjectFile) => void;
   onSetMain: (path: string) => void;
 }
 
-export function FileTree({ nodes, activePath, mainFile, canEdit, onOpen, onHide, onSearch, onNewFile, onDelete, onSetMain }: FileTreeProps) {
-  const [closed, setClosed] = useState<Set<string>>(() => new Set(['capitulos/metodologia']));
+export function FileTree(props: FileTreeProps) {
+  const { nodes, activePath, mainFile, canEdit, uploading, onHide, onSearch, onNewFile, onPickFiles, onDropFiles } = props;
+  const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const toggle = (path: string) => {
     const next = new Set(closed);
@@ -54,9 +63,6 @@ export function FileTree({ nodes, activePath, mainFile, canEdit, onOpen, onHide,
             <Icon name={closed.has(node.path) ? 'folder' : 'folderOpen'} size={16} className="text-muted" />
             <span className="min-w-0 flex-1 truncate">{node.name}</span>
           </button>
-          {dropTarget === node.path && (
-            <span className="ml-8 block text-[12px] font-semibold text-accent-text">Soltá para subir a {node.path}/</span>
-          )}
           {!closed.has(node.path) && (
             <ul role="group" className="m-0 flex list-none flex-col gap-px p-0">
               {renderNodes(node.children, level + 1)}
@@ -71,9 +77,11 @@ export function FileTree({ nodes, activePath, mainFile, canEdit, onOpen, onHide,
           active={node.path === activePath}
           main={node.path === mainFile}
           canEdit={canEdit}
-          onOpen={() => onOpen(node.path)}
-          onDelete={() => onDelete(node.path)}
-          onSetMain={() => onSetMain(node.path)}
+          url={props.fileUrl(node.file)}
+          onOpen={() => props.onOpen(node.path)}
+          onRename={() => props.onRename(node.file)}
+          onDelete={() => props.onDelete(node.file)}
+          onSetMain={() => props.onSetMain(node.path)}
         />
       ),
     );
@@ -88,6 +96,8 @@ export function FileTree({ nodes, activePath, mainFile, canEdit, onOpen, onHide,
       }}
       onDrop={(event) => {
         event.preventDefault();
+        const files = [...event.dataTransfer.files];
+        if (canEdit && files.length > 0) onDropFiles(dropTarget ?? '', files);
         setDropTarget(null);
       }}
     >
@@ -96,7 +106,7 @@ export function FileTree({ nodes, activePath, mainFile, canEdit, onOpen, onHide,
         {canEdit && (
           <>
             <IconButton icon="filePlus" size="xs" label="Nuevo archivo" onClick={onNewFile} />
-            <IconButton icon="upload" size="xs" label="Subir archivos" />
+            <IconButton icon="upload" size="xs" label="Subir archivos" onClick={onPickFiles} disabled={uploading} />
           </>
         )}
         <IconButton icon="panelLeft" size="xs" label="Ocultar archivos" onClick={onHide} />
@@ -118,11 +128,16 @@ export function FileTree({ nodes, activePath, mainFile, canEdit, onOpen, onHide,
         className={`m-0 flex min-h-0 flex-1 list-none flex-col gap-px overflow-auto px-1.5 pb-2 ${dropTarget === '' ? 'bg-accent-soft/40' : ''}`}
       >
         {renderNodes(nodes, 0)}
+        {nodes.length === 0 && <li className="px-2 py-3 text-[13px] text-muted">El proyecto no tiene archivos.</li>}
       </ul>
       {canEdit && (
-        <p className="m-2.5 mt-0 flex items-start gap-2 rounded-lg border border-dashed border-border p-2.5 text-[12.5px] leading-snug text-muted">
-          <Icon name="upload" size={15} className="mt-px" />
-          {dropTarget !== null ? `Soltá para subir a ${dropTarget ? `${dropTarget}/` : 'la raíz'}.` : 'Arrastrá archivos al árbol o a una carpeta para subirlos.'}
+        <p role="status" className="m-2.5 mt-0 flex items-start gap-2 rounded-lg border border-dashed border-border p-2.5 text-[12.5px] leading-snug text-muted">
+          <Icon name={uploading ? 'spinner' : 'upload'} size={15} className={`mt-px ${uploading ? 'animate-spin' : ''}`} />
+          {uploading
+            ? 'Subiendo…'
+            : dropTarget !== null
+              ? `Soltá para subir a ${dropTarget ? `${dropTarget}/` : 'la raíz'}.`
+              : 'Arrastrá archivos al árbol o a una carpeta para subirlos.'}
         </p>
       )}
     </nav>
@@ -135,20 +150,22 @@ interface FileItemProps {
   active: boolean;
   main: boolean;
   canEdit: boolean;
+  url: string;
   onOpen: () => void;
+  onRename: () => void;
   onDelete: () => void;
   onSetMain: () => void;
 }
 
-function FileItem({ node, level, active, main, canEdit, onOpen, onDelete, onSetMain }: FileItemProps) {
+function FileItem({ node, level, active, main, canEdit, url, onOpen, onRename, onDelete, onSetMain }: FileItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [preview, setPreview] = useState<{ top: number; left: number } | null>(null);
   const image = isImage(node.path);
   const items: MenuItem[] = [
     { label: 'Abrir', icon: 'file', shortcut: 'Enter', onSelect: onOpen },
-    ...(canEdit ? [{ label: 'Renombrar o mover', icon: 'pencil' as const, shortcut: 'F2' }] : []),
-    ...(canEdit && node.path.endsWith('.tex') && !main ? [{ label: 'Usar como principal', icon: 'star' as const, onSelect: onSetMain }] : []),
-    { label: 'Descargar', icon: 'download' },
+    ...(canEdit ? [{ label: 'Renombrar o mover', icon: 'pencil' as const, shortcut: 'F2', onSelect: onRename }] : []),
+    ...(canEdit && /\.tex$/i.test(node.path) && !main ? [{ label: 'Usar como principal', icon: 'star' as const, onSelect: onSetMain }] : []),
+    { label: 'Descargar', icon: 'download', onSelect: () => download(url) },
     ...(canEdit ? [{ label: 'Borrar', icon: 'trash' as const, shortcut: 'Supr', danger: true, separated: true, onSelect: onDelete }] : []),
   ];
 
@@ -175,6 +192,7 @@ function FileItem({ node, level, active, main, canEdit, onOpen, onDelete, onSetM
         onBlur={() => setPreview(null)}
         onKeyDown={(event) => {
           if (event.key === 'Delete' && canEdit) onDelete();
+          if (event.key === 'F2' && canEdit) onRename();
         }}
         style={{ paddingLeft: 6 + level * 16 + 20 }}
         className={`flex h-[30px] w-full min-w-0 items-center gap-1.5 rounded-md pr-8 text-left text-[13.5px] ${
@@ -196,12 +214,12 @@ function FileItem({ node, level, active, main, canEdit, onOpen, onDelete, onSetM
           onOpenChange={setMenuOpen}
           width={230}
           items={items}
-          trigger={(props) => (
+          trigger={(triggerProps) => (
             <button
               type="button"
               aria-label={`Acciones de ${node.name}`}
               className="flex size-6 items-center justify-center rounded text-muted hover:bg-surface hover:text-text"
-              {...props}
+              {...triggerProps}
             >
               <Icon name="more" size={16} strokeWidth={2.6} />
             </button>
@@ -209,8 +227,10 @@ function FileItem({ node, level, active, main, canEdit, onOpen, onDelete, onSetM
         />
       </div>
       {preview && (
-        <div style={preview} className="fixed z-30 flex w-[232px] flex-col gap-2 rounded-[10px] border border-border bg-surface p-2 shadow-pop">
-          <ImagePlaceholder className="h-[140px]" />
+        <div style={preview} className="pointer-events-none fixed z-30 flex w-[232px] flex-col gap-2 rounded-[10px] border border-border bg-surface p-2 shadow-pop">
+          <div className="flex h-[140px] items-center justify-center overflow-hidden rounded-md border border-border bg-white">
+            <img src={url} alt="" className="max-h-full max-w-full object-contain" />
+          </div>
           <div className="flex justify-between gap-2 px-1 pb-0.5 text-[12.5px]">
             <span className="truncate font-semibold">{node.name}</span>
             <span className="flex-none text-muted">{formatBytes(node.file.size)}</span>
@@ -218,21 +238,5 @@ function FileItem({ node, level, active, main, canEdit, onOpen, onDelete, onSetM
         </div>
       )}
     </li>
-  );
-}
-
-/** Imagen de muestra (paso 1): el árbol todavía no baja las imágenes reales. */
-export function ImagePlaceholder({ className = '' }: { className?: string }) {
-  return (
-    <div className={`flex items-center justify-center rounded-md border border-border bg-white ${className}`}>
-      <svg width="150" height="100" viewBox="0 0 150 100" aria-hidden="true">
-        <path d="M10 85 Q40 30 75 55 T140 25" fill="none" stroke="#2F45C6" strokeWidth="2" />
-        <path d="M10 85 Q50 60 80 70 T140 60" fill="none" stroke="#0F766E" strokeWidth="2" strokeDasharray="4 3" />
-        <circle cx="40" cy="48" r="5" fill="#C2410C" />
-        <circle cx="96" cy="58" r="5" fill="#C2410C" />
-        <circle cx="124" cy="34" r="5" fill="#C2410C" />
-        <path d="M10 90h130M10 10v80" stroke="#8F8B82" strokeWidth="1" />
-      </svg>
-    </div>
   );
 }

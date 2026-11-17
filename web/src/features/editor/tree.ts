@@ -56,7 +56,8 @@ export function fileIcon(path: string): IconName {
   return 'file';
 }
 
-export const isImage = (path: string) => IMAGE.test(path);
+/** Imágenes que el navegador muestra (para la vista previa); EPS no. */
+export const isImage = (path: string) => /\.(png|jpe?g|gif|svg|webp)$/i.test(path);
 
 export function baseName(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);

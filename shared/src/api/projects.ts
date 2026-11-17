@@ -7,6 +7,11 @@ export type ProjectRole = (typeof PROJECT_ROLES)[number];
 export const ASSIGNABLE_ROLES = ['editor', 'viewer'] as const;
 export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 
+/** Orden de los roles: cada uno puede todo lo del anterior. */
+export const ROLE_RANK: Record<ProjectRole, number> = { viewer: 0, editor: 1, owner: 2 };
+/** Al unirse con un enlace siendo miembro, se queda el rol más alto. */
+export const higherRole = (a: ProjectRole, b: ProjectRole): ProjectRole => (ROLE_RANK[a] >= ROLE_RANK[b] ? a : b);
+
 export const FILE_KINDS = ['text', 'binary'] as const;
 export type FileKind = (typeof FILE_KINDS)[number];
 
@@ -57,6 +62,15 @@ export interface FileResponse { file: ProjectFile }
 export interface MemberListResponse { members: ProjectMember[] }
 export interface ShareLinkListResponse { links: ShareLink[] }
 export interface JoinResponse { projectId: string; role: ProjectRole }
+/** Lo que se acepta al unirse, antes de unirse. `currentRole`: mi rol si ya soy miembro. */
+export interface SharePreview {
+  projectId: string;
+  projectName: string;
+  ownerName: string | null;
+  role: AssignableRole;
+  currentRole: ProjectRole | null;
+}
+export interface SharePreviewResponse { preview: SharePreview }
 
 // Peticiones
 export interface CreateProjectRequest { name: string }
