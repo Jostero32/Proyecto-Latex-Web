@@ -5,6 +5,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['apps/*/test/integration/**/*.test.ts'],
+    // Crea y migra la base latexweb_test (o la marca como no disponible).
+    globalSetup: ['apps/server/test/integration/global-setup.ts'],
     // Un archivo a la vez: cada compilación usa 1 CPU y hasta 1 GB.
     fileParallelism: false,
     testTimeout: 180_000,

@@ -23,3 +23,6 @@ fixtures/latex/**/*.pdf
 # Rastros del fixture malicioso si alguna vez se compila sin sandbox
 fixtures/latex/malicioso/pwned-*.txt
 fixtures/latex/malicioso/passwd-robado.txt
+
+# Cliente de Prisma generado (prisma generate, en el postinstall de apps/server)
+apps/server/src/generated/
