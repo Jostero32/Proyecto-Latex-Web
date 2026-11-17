@@ -5,78 +5,75 @@ visual sobre el mismo documento. Plan y estado: `docs/roadmap.md`.
 
 ## Stack
 - Monorepo pnpm workspaces, TypeScript estricto en todo
-- apps/web: React + Vite, React Router, TanStack Query, Tailwind CSS, CodeMirror 6 + y-codemirror.next, PDF.js
-- apps/server: Fastify (API REST bajo `/api`) + Hocuspocus (Yjs) en el mismo proceso, WebSocket en `/collab`;
+- `web/`: React + Vite, React Router, TanStack Query, Tailwind CSS, CodeMirror 6 + y-codemirror.next, PDF.js
+- `server/`: Fastify (API REST bajo `/api`) + Hocuspocus (Yjs) en el mismo proceso, WebSocket en `/collab`;
   PostgreSQL con Drizzle ORM; sesiones con cookies httpOnly
-- apps/compiler: worker BullMQ (Redis) que compila en Docker con TeX Live + latexmk
-- Archivos: MinIO (API S3). Server y compiler se comunican solo por Redis (cola) y MinIO (archivos)
-- packages/shared: contratos de la API (tipos de request/response y códigos de error) y utilidades comunes
+- `compiler/`: worker BullMQ (Redis) que compila en Docker con TeX Live + latexmk
+- Archivos binarios y resultados de compilación: MinIO (API S3). Server y compiler se comunican solo por
+  Redis (cola) y MinIO
+- `shared/`: contratos de la API (tipos y códigos de error) y utilidades puras comunes
 
-El navegador ve un solo origen: Vite (dev y preview) hace de proxy de `/api` y `/collab` al server.
-
-> Bloque 1 del roadmap en curso: el código todavía usa Prisma (pasa a Drizzle), rutas sin `/api` y disco
-> compartido entre server y compiler (pasa a MinIO en el bloque 2).
+> Paso 1 de `docs/specs/backend.md` pendiente: el código todavía está en `apps/` y `packages/`, usa Prisma
+> y comparte disco entre server y compiler.
 
 ## Comandos
 - Instalar: `pnpm install`
-- Toda la app en contenedores: `docker compose up -d --build` → http://localhost:5173
+- Toda la app en contenedores: `docker compose up -d --build`
   (el servicio compiler monta el socket de Docker: solo para uso local)
 - Dev con hot reload: `docker compose up -d postgres redis minio` y después `pnpm dev` (lee `.env` si existe)
-- Tests: `pnpm test` · integración (Docker, Postgres, Redis, MinIO reales): `pnpm test:integration`
+- Tests (con postgres, redis y minio levantados): `pnpm test`
+- Tests de compilación real con Docker y TeX Live (lentos): `pnpm test:compile`
 - Lint y tipos: `pnpm lint && pnpm typecheck`
-- Base de datos: cambiar `apps/server/src/db/schema.ts` y generar la migración con
-  `pnpm --filter @latexweb/server db:generate`. El server aplica las migraciones pendientes al arrancar.
+- Base de datos: cambiar `server/src/schema.ts` y generar la migración con `pnpm --filter server db:generate`.
+  El server aplica las migraciones pendientes al arrancar.
 
 ## Estructura de carpetas
-Todo código nuevo sigue estas reglas. No crear carpetas vacías: cada una aparece con su primer archivo.
+Plana: una carpeta por app en la raíz (`server/`, `compiler/`, `web/`, `shared/`) y `docs/`. Una carpeta
+nueva solo cuando agrupa varios archivos; si va a tener uno, es un archivo.
 
-**Regla común a server y web:** el código de una funcionalidad vive en `features/<funcionalidad>/`, con
-archivos nombrados por su rol sin repetir el nombre de la carpeta (`features/projects/routes.ts`, no
-`projects-routes.ts`). `index.ts` es su API pública: desde fuera se importa solo `index.ts`, nunca un
-archivo interno de otra funcionalidad.
+```
+server/
+  src/
+    index.ts        arranque: config, migraciones, buildApp, listen, apagado
+    app.ts          arma Fastify: cookies, multipart, guardas, errores y las rutas de cada feature bajo /api
+    config.ts       único lugar donde se lee process.env
+    db.ts           cliente de Drizzle y migrar
+    schema.ts       todas las tablas
+    http.ts         lo transversal de HTTP: respuestas de error, guardas de Host y Origin
+    storage.ts      cliente S3 (MinIO)
+    features/<f>/   routes.ts, service.ts y lo que la feature necesite (auth, projects, files, collab, compile)
+  drizzle/          migraciones SQL generadas
+  test/             tests del server
+compiler/
+  texlive/          imagen de TeX Live de las compilaciones
+  src/              index.ts, config.ts, processor.ts, docker.ts, workspace.ts, storage.ts, log.ts
+  test/             tests del compiler; test/fixtures/ con los proyectos LaTeX de prueba
+web/
+  src/              main.tsx, app/ (router, providers, layout), lib/ (api.ts), components/ (UI genérica),
+                    features/<f>/ (páginas, componentes y hooks de cada feature)
+shared/src/         api/ (contratos por feature) y utilidades puras (project-paths, env)
+```
 
-apps/server/src:
-- `index.ts`: solo arranque (config, migraciones, `buildApp`, listen, apagado)
-- `app.ts`: `buildApp`, que arma Fastify y registra plugins y funcionalidades bajo `/api`
-- `config.ts`: configuración; único lugar donde se lee `process.env`
-- `db/`: `schema.ts` (todas las tablas), `client.ts` y `migrate.ts`. Migraciones SQL en `apps/server/drizzle/`
-- `plugins/`: plugins de Fastify compartidos (multipart, cookies, guardas de request)
-- `lib/`: utilidades sin lógica de negocio (no importan de `features/` ni de `db/`), p. ej. el cliente S3
-- `features/<funcionalidad>/`: `routes.ts`, `service.ts` (lógica y acceso a datos) y lo que haga falta
+- Las features se importan entre sí por sus archivos (`../auth/service`), sin `index.ts` de reexportación.
+- Una feature no importa las rutas de otra; comparte lógica a través de su `service.ts`.
 
-apps/web/src:
-- `main.tsx` y `app/`: router, providers (TanStack Query) y layout
-- `lib/`: cliente HTTP de la API (`api.ts`), utilidades sin UI
-- `components/`: componentes de UI genéricos y sin lógica de negocio (botón, diálogo, panel)
-- `features/<funcionalidad>/`: páginas, componentes, hooks y llamadas a la API de esa funcionalidad
-  (`auth`, `projects`, `files`, `editor`, `pdf`, `collab`…)
-
-apps/compiler:
-- `texlive/`: Dockerfile e imagen de TeX Live de las compilaciones
-- `src/index.ts` (arranque) y `src/config.ts` (único lugar donde se lee `process.env`)
-- `src/worker/` (processor), `src/docker/` (`docker run` y ejecución), `src/workspace/` (disco de trabajo
-  propio del compiler) y `src/storage/` (bajar entradas y subir resultados a MinIO)
-
-packages/shared/src: `api/` (contratos por funcionalidad) y utilidades puras (`project-paths`, `env`).
-
-Tests:
-- Unitarios: al lado de su archivo, como `<archivo>.test.ts`. Corren con `pnpm test`.
-- De integración: en `apps/<app>/test/integration/`. Los que necesitan servicios externos o son lentos.
+## Tests
+- Van en `<app>/test/`, no al lado del código. `pnpm test` los corre todos menos los de compilación real.
+- Uno por feature de punta a punta (`test/projects.test.ts`): HTTP con `app.inject` contra Postgres, Redis y
+  MinIO reales. Cubre el camino feliz y los permisos.
+- Unitarios solo para lógica pura no trivial o de seguridad (rutas, zip, matriz de permisos, parseo del log).
+- Nada de tablas exhaustivas de casos triviales ni de un test por cada mensaje de error.
+- Compilación real con Docker (`compiler/test/compile.test.ts`) solo con `pnpm test:compile`.
 
 ## Forma de trabajo
-- Prioridad: que cada bloque termine en algo usable en el navegador. Backend sin pantalla no cierra un bloque.
-- Specs cortas en `docs/specs/` (~1 página): objetivo, alcance, diseño, archivos, pasos, criterios y riesgos.
-  Verificar los supuestos técnicos antes de escribirlos.
-- Pasos de alcance grande: cada uno entrega una parte completa y usable (UI, rutas, lógica, persistencia y
-  tests). Preferir pocos pasos.
+- Specs cortas en `docs/specs/`: objetivo, alcance, diseño, archivos, pasos, criterios y riesgos. Verificar
+  los supuestos técnicos antes de escribirlos.
+- Pocos pasos de alcance grande: cada uno entrega una parte completa y usable (rutas, lógica, persistencia y
+  tests). Una spec tiene 3 o 4 pasos, no 10.
 - Aprobada la spec, implementar de corrido con un commit por paso y reportar al final. Detenerse solo si un
   supuesto de la spec resulta falso o aparece una decisión de diseño que no está en la spec.
-- Tests escritos junto con el código, pocos y útiles:
-  - unitarios para lógica no trivial y para todo lo de seguridad; nada de tablas exhaustivas de casos triviales;
-  - un test de punta a punta por funcionalidad;
-  - `pnpm test:integration` solo si cambia algo de compilación, Docker o base de datos.
-- Una verificación en vivo en el navegador al final de cada bloque, no en cada paso.
-- Al cerrar un bloque que toca sandbox, auth, permisos o archivos: `/security-review`. Crítico y alto se
+- Sin subagentes por paso. Una verificación en vivo al final de la spec, no en cada paso.
+- Al cerrar una spec que toca sandbox, auth, permisos o archivos: `/security-review`. Crítico y alto se
   corrige en el momento; medio y bajo va a `docs/backlog.md`.
 - Simplicidad antes que endurecimiento especulativo: proteger lo que está expuesto, no casos hipotéticos.
 
@@ -85,6 +82,6 @@ Tests:
 - Al terminar cada paso: `pnpm test`, `pnpm typecheck` y `pnpm lint` en verde antes del commit
 - Nunca habilitar shell-escape en la compilación de LaTeX
 - Toda compilación corre sin red y con límites de CPU, RAM y tiempo
-- Autorización de proyectos siempre con `assertProjectAccess`, también en el WebSocket
+- Toda acción sobre un proyecto pasa por `assertProjectAccess`, también en el WebSocket
 - No agregar dependencias sin explicar por qué
 - Mensajes de commit en español, formato: `tipo: descripción`
