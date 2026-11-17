@@ -1,113 +1,83 @@
 # Roadmap
 
-## Plan vigente: bloques grandes (2026-11-17)
-Para terminar la app rápido, los ítems de abajo se agrupan en bloques, cada uno con **una** spec de
-pasos grandes (CLAUDE.md, "Forma de trabajo"):
+## Plan vigente (2026-11-17)
+Objetivo: un clon de Overleaf usable. Cada bloque termina en algo que se usa desde el navegador y tiene
+**una** spec con pocos pasos grandes (CLAUDE.md, "Forma de trabajo").
 
-| Bloque | Contenido (ítems de abajo) | Estado |
-|---|---|---|
-| — | compilación (0), auth (3) | **hecho** |
-| B. Núcleo del backend | proyectos-y-archivos (4), compilar-proyecto (5), permisos-y-compartir (6) | siguiente |
-| C. Colaboración y feedback | colaboracion (7), errores-del-log (2), synctex (9) | pendiente |
-| D. Frontend | login, lista de proyectos, editor CodeMirror + Yjs, árbol de archivos, visor PDF.js, panel de errores | pendiente |
-| E. Cierre | historial (8), ci (1), limites-y-cuotas (10), despliegue (11) | pendiente |
+| # | Bloque | Qué se puede hacer al terminar | Estado |
+|---|---|---|---|
+| — | compilación, auth (API) | compilar por API, registrarse e iniciar sesión por API | hecho |
+| 1 | Cimientos | entrar a la web, registrarse, iniciar y cerrar sesión. Base de código reordenada | spec: `cimientos.md` |
+| 2 | Proyectos y editor | crear o importar un proyecto, subir imágenes, editar, compilar y ver el PDF | pendiente |
+| 3 | Colaboración | compartir con roles, editar entre varios en vivo con cursores y presencia | pendiente |
+| 4 | Feedback de compilación | panel de errores que salta a la línea, SyncTeX (código ↔ PDF), autocompilar | pendiente |
+| 5 | Editor visual | alternar código/visual sobre el mismo documento, barra de formato, insertar figuras | pendiente |
+| 6 | Cierre | historial de versiones, cuotas, despliegue | pendiente |
 
 Pendientes menores y hallazgos de seguridad: `docs/backlog.md`.
 
----
+## Decisiones de arquitectura
+- **Drizzle en lugar de Prisma** (bloque 1). Con Prisma había que generar el cliente (`postinstall`,
+  `src/generated`), descargar binarios (`allowBuilds`, aviso de openssl), mantener un servicio `migrate` y
+  una etapa extra del Dockerfile, y `prisma.config.ts` leía `process.env` fuera de `config.ts`. Con
+  Drizzle el esquema es TypeScript, los tipos salen del esquema sin generar nada, las migraciones son SQL
+  versionado y el server las aplica al arrancar. Con 2 tablas, ahora es el momento barato de cambiar.
+- **Un solo origen para el navegador** (bloque 1): la API pasa a `/api` y Vite hace de proxy de `/api` y
+  `/collab`. Sin CORS, cookies simples y el WebSocket en el mismo host.
+- **Server y compiler no comparten disco** (bloque 2): el server escribe una instantánea del proyecto en
+  MinIO y encola. El compiler baja la instantánea a **su** disco de trabajo, compila y sube PDF y log a
+  MinIO. Se quitan el volumen compartido `compile-storage`, `COMPILE_STORAGE_DIR` en el server, los
+  chequeos de espacio en la API y `POST /compilations` anónimo con multipart: se compilan proyectos.
+- **Contenido de los archivos** (bloque 2): un `Y.Doc` por proyecto, persistido en Postgres. Tiene el
+  árbol de archivos (`Y.Map` id → {path, tipo}) y un `Y.Text` por archivo de texto. Los binarios
+  (imágenes, PDF) van a MinIO. Así el editor nace colaborativo, y compilar o exportar un zip es
+  serializar el `Y.Doc` y los binarios.
+- **Editor visual = decoraciones de CodeMirror 6** (bloque 5) sobre el mismo `Y.Text`, como el Visual
+  Editor de Overleaf. No usar un editor WYSIWYG aparte con conversión LaTeX ↔ HTML: pierde información y
+  rompe la colaboración.
 
-## Roadmap original del backend
-Specs pendientes del backend en orden de dependencia. El alcance de cada ítem es orientativo: la spec
-del bloque lo define.
+## Bloques
 
-## Orden
+### 1. Cimientos — `docs/specs/cimientos.md`
+Prisma → Drizzle, API bajo `/api`, proxy de Vite, esqueleto de la web (router, TanStack Query, Tailwind,
+cliente de la API) con registro, login, logout y una página de inicio protegida. Orden de carpetas
+(`apps/compiler/texlive`), `.env` en `pnpm dev` y CI en GitHub Actions.
 
-```
-0. compilacion (pasos 6-9)
-   ├── 1. ci
-   ├── 2. errores-del-log
-   └── 3. auth
-        └── 4. proyectos-y-archivos
-             ├── 5. compilar-proyecto ──┐
-             └── 6. permisos-y-compartir┤
-                                        ├── 7. colaboracion
-                                        │     └── 8. historial
-                                        └── 9. synctex
-                                              10. limites-y-cuotas   (después de 5 y 6)
-                                              11. despliegue         (al final)
-```
+### 2. Proyectos y editor
+Base: el borrador `docs/specs/proyectos.md`, a reescribir con estas decisiones.
+- Backend: modelos `projects`, `project_members` (solo dueño por ahora), `files`, `compilations`;
+  `assertProjectAccess`; CRUD de proyectos y archivos; import y export zip seguro (yauzl/yazl); bucket de
+  MinIO; Hocuspocus con auth de sesión en el upgrade y persistencia del `Y.Doc` en Postgres.
+- Compilación: `POST /api/projects/:id/compile` → instantánea en MinIO → cola → el compiler compila desde
+  MinIO → PDF y log en MinIO. Se retira la subida multipart y el disco compartido.
+- Web: lista de proyectos (crear, importar zip, renombrar, borrar); la pantalla del editor con árbol de
+  archivos (crear, renombrar, mover, borrar, subir imágenes arrastrando), CodeMirror con resaltado LaTeX,
+  vista previa de imágenes, botón Compilar, visor PDF.js y el log crudo.
 
-## 0. compilacion — en curso
-Terminar los pasos 6 a 9 de `docs/specs/compilacion.md`: el processor del worker, la API
-`/compilations` (subida, estado, descargas) y la prueba de punta a punta con `/probar-compilacion` y
-`revisor-seguridad`. Bloquea todo lo demás que compila.
+### 3. Colaboración
+Roles dueño, editor y lector; enlaces para compartir (con rol, vencimiento y revocables). `readOnly` en
+Hocuspocus para lectores. Cursores y selecciones de otros usuarios (awareness de y-codemirror.next), lista
+de conectados, árbol de archivos en vivo (ya está en el `Y.Doc`). Límites de tamaño de mensaje y de
+documento.
 
-## 1. ci — *nuevo, propuesto*
-GitHub Actions: `pnpm install --frozen-lockfile`, `lint`, `typecheck` y `test` en cada PR. Además, un job
-con Docker que construye la imagen (con caché) y corre `pnpm test:integration` con
-`LATEXWEB_REQUIRE_DOCKER=1`. Es chico y protege a todo lo que viene, por eso va temprano.
+### 4. Feedback de compilación
+Parseo del log (`-file-line-error`) a errores y advertencias con archivo y línea; `output.blg` de biber.
+Panel de errores y marcas en el editor que saltan a la línea. SyncTeX (`-synctex=1`) en las dos
+direcciones. Compilar con Ctrl+S y opcionalmente al dejar de escribir.
 
-## 2. errores-del-log — *adelantado*
-Parsear el log de LaTeX en errores y advertencias con archivo, línea y mensaje (aprovechando
-`-file-line-error`), e incluir `output.blg` para los errores de biber (hoy no se publica). Solo depende
-de la compilación, así que puede hacerse en paralelo con auth.
+### 5. Editor visual
+Modo visual en CodeMirror con decoraciones y widgets: títulos de sección, negrita, cursiva, listas,
+fórmulas renderizadas (KaTeX), figuras con la imagen del proyecto, tablas simples. La fuente vuelve a
+aparecer donde está el cursor. Barra de herramientas (formato, secciones, insertar figura, tabla o
+fórmula) que funciona en los dos modos. Arrastrar una imagen al editor inserta la figura.
 
-## 3. auth
-Prisma + Postgres (primer modelo y migraciones; esta spec monta la base de datos para todo el proyecto),
-registro, login y logout, y sesiones en cookies httpOnly + `Secure` + `SameSite`. Incluye protección
-**CSRF** (obligatoria con sesiones en cookie), hash de contraseñas con argon2 y rate limit en login. A
-decidir en la spec: dónde viven las sesiones (Postgres o Redis), y si entran verificación de email y
-recuperación de contraseña o van después.
+### 6. Cierre
+Historial (instantáneas del `Y.Doc`, diff y restaurar), límites y cuotas por usuario (compilaciones
+concurrentes, tamaño de proyecto y de cuenta, limpieza en MinIO), despliegue (Docker sin root o gVisor
+para el worker, HTTPS y `COOKIE_SECURE`).
 
-## 4. proyectos-y-archivos
-CRUD de proyectos, árbol de archivos (crear, renombrar, mover, borrar) y subida y descarga, con los
-binarios en MinIO y los metadatos en Postgres. Importar y exportar zip, con protección contra bombas
-de descompresión, symlinks y rutas (reusando `normalizeProjectPath`). Crea la tabla de **miembros del
-proyecto** con solo el rol dueño y un único `assertProjectAccess(usuario, proyecto, acción)`, que
-después usan 5, 6 y 7.
-
-## 5. compilar-proyecto
-Compilar desde un proyecto guardado en lugar de multipart: el worker lee los archivos de MinIO
-(implementación de MinIO de la interfaz de workspace/storage de la spec de compilación) y los
-artefactos se guardan asociados al proyecto. Solo los miembros ven el estado, el PDF y el log. Se
-**retira o restringe** `POST /compilations` anónimo, que hoy permite compilar sin cuenta.
-
-## 6. permisos-y-compartir — *adelantado, antes de colaboración*
-Roles dueño, editor y lector sobre la tabla de miembros, invitaciones (por enlace con token de un solo
-uso; el email puede ir después) y compartir por enlace de solo lectura o de edición, revocable. Va
-antes de colaboración para que el WebSocket nazca con la distinción lector/editor
-(`readOnly` en Hocuspocus) en lugar de agregarla después.
-
-## 7. colaboracion
-Autenticación y autorización en el manejador de upgrade de `/collab` (sesión + permiso sobre el
-documento; ya marcado en `features/collab/websocket.ts`), persistencia de los documentos Yjs en Postgres y
-sincronización Yjs ↔ archivos: lo que se compila tiene que ser el estado actual del documento
-colaborativo, no una copia vieja en MinIO. Límites de tamaño de mensaje y de documento.
-
-## 8. historial
-Versiones de los archivos y del proyecto (snapshots de Yjs o del árbol en MinIO), ver una versión, diff
-entre versiones y restaurar. Depende de colaboración porque las ediciones llegan por Yjs.
-
-## 9. synctex
-Compilar con `-synctex=1` (agregar la opción a la lista blanca de `latexweb-compile.sh` y a
-`docker-args`), publicar `output.synctex.gz` y exponer la búsqueda en las dos direcciones (código → PDF
-y PDF → código). Se puede hacer apenas esté la 5; es más útil cuando exista el visor en el frontend.
-
-## 10. limites-y-cuotas — *nuevo, propuesto*
-Rate limiting por usuario (la spec de compilación lo posterga "hasta que haya autenticación"),
-compilaciones concurrentes por usuario, tamaño máximo de proyecto y de cuenta, y limpieza de artefactos
-y proyectos borrados en MinIO. Va después de 5 y 6, cuando hay usuarios y proyectos que limitar.
-
-## 11. despliegue — *nuevo, propuesto*
-Dockerfiles de `server` y `compiler`, configuración de producción y cómo corre el worker con acceso a
-Docker sin dar root sobre el host (Docker rootless o gVisor), un riesgo ya anotado en la spec de
-compilación. Va al final, cuando el backend está completo.
-
-## Cambios respecto de la lista inicial
-- **Nuevos:** `ci` (temprano), `limites-y-cuotas` y `despliegue`.
-- **Adelantados:** `errores-del-log` (no depende de auth) y `permisos-y-compartir` (antes de
-  colaboración, para no rehacer la autorización del WebSocket).
-- **Responsabilidades movidas:** la tabla de miembros y `assertProjectAccess` nacen en
-  `proyectos-y-archivos`, para que `compilar-proyecto` pueda restringir el acceso sin esperar a los roles.
-- **Dentro de `auth`:** CSRF y rate limit en login, que la lista inicial no mencionaba y son obligatorios
-  con sesiones en cookie.
+## Historial del plan
+- Hasta el 2026-11-17 el plan era primero el backend completo (bloques B a E), con el frontend al final.
+  Se cambió porque después de compilación y auth todavía no había nada usable en el navegador.
+- Lo hecho antes de este plan está en `docs/specs/estructura-monorepo.md`, `compilacion.md`,
+  `docker-compose.md` y `auth.md`.
