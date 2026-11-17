@@ -8,17 +8,26 @@ import type { Duplex } from 'node:stream';
 import { Hocuspocus, type WebSocketLike } from '@hocuspocus/server';
 import crossws from 'crossws/adapters/node';
 import type { FastifyInstance } from 'fastify';
+import { isAllowedHost, isAllowedOrigin, type RequestGuardOptions } from '../../lib/request-guard';
 
 export const COLLAB_PATH = '/collab';
+
+/**
+ * Tamaño máximo de un mensaje WebSocket. El valor por defecto de `ws` es 100 MiB, y se aplica
+ * antes de autenticar: muchas conexiones con mensajes así agotarían la memoria del proceso, que
+ * también sirve la API.
+ */
+export const COLLAB_MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
 
 type ClientConnection = ReturnType<Hocuspocus['handleConnection']>;
 
 /** Monta Hocuspocus en `app` (sin extensiones: ni autenticación ni persistencia todavía). */
-export function attachCollab(app: FastifyInstance): Hocuspocus {
+export function attachCollab(app: FastifyInstance, guard: RequestGuardOptions): Hocuspocus {
   const hocuspocus = new Hocuspocus({ name: 'collab', quiet: true });
   const connections = new WeakMap<object, ClientConnection>();
 
   const websocket = crossws({
+    serverOptions: { maxPayload: COLLAB_MAX_MESSAGE_BYTES },
     hooks: {
       open(peer) {
         const connection = hocuspocus.handleConnection(asWebSocketLike(peer.websocket), peer.request);
@@ -59,6 +68,18 @@ export function attachCollab(app: FastifyInstance): Hocuspocus {
     }
     if (path !== COLLAB_PATH) {
       rejectUpgrade(socket, 404, 'Not Found');
+      return;
+    }
+    // El navegador deja que cualquier página abra un WebSocket a 127.0.0.1 (no hay CORS): sin
+    // esto, otro sitio que el usuario visite podría leer y escribir documentos. Host contra DNS
+    // rebinding; Origin contra sitios ajenos (sin Origin = no es un navegador).
+    if (!isAllowedHost(request.headers.host, guard)) {
+      rejectUpgrade(socket, 403, 'Forbidden');
+      return;
+    }
+    const origin = Array.isArray(request.headers.origin) ? request.headers.origin[0] : request.headers.origin;
+    if (!isAllowedOrigin(origin, guard)) {
+      rejectUpgrade(socket, 403, 'Forbidden');
       return;
     }
 

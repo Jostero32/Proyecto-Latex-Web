@@ -605,3 +605,187 @@ describe('POST /compilations: fallo a mitad de saveInputs', () => {
     expect(removed).toHaveLength(1);
   });
 });
+
+describe('POST /compilations: subidas simultáneas', () => {
+  /** saveInputs que queda colgado hasta llamar a release(); `entered` resuelve al entrar la n-ésima vez. */
+  function hangingStorage() {
+    const real = createLocalCompilationsStorage(root);
+    const releases: Array<() => void> = [];
+    let entries = 0;
+    const waiters: Array<{ count: number; resolve: () => void }> = [];
+    const storage = {
+      ...real,
+      saveInputs: async (...args: Parameters<typeof real.saveInputs>) => {
+        entries++;
+        for (const w of waiters) if (entries >= w.count) w.resolve();
+        await new Promise<void>((resolve) => releases.push(resolve));
+        return real.saveInputs(...args);
+      },
+    };
+    return {
+      storage,
+      entered: (count: number) =>
+        new Promise<void>((resolve) => (entries >= count ? resolve() : waiters.push({ count, resolve }))),
+      releaseAll: () => releases.splice(0).forEach((release) => release()),
+    };
+  }
+
+  it('con maxConcurrentUploads: 1, la segunda subida recibe 503 queue_full y al liberar la primera una tercera pasa', async () => {
+    await app.close();
+    const hang = hangingStorage();
+    app = await buildApp({
+      compilations: { queue, storage: hang.storage, config: { ...baseConfig(root), maxConcurrentUploads: 1 } },
+    });
+
+    const first = upload([{ name: 'main.tex' }]);
+    await hang.entered(1);
+
+    const second = await upload([{ name: 'main.tex' }]);
+    expect(second.statusCode).toBe(503);
+    expectErrorShape(second.json(), 'queue_full');
+    expect(second.headers['retry-after']).toBeDefined();
+
+    hang.releaseAll();
+    expect((await first).statusCode).toBe(202);
+
+    const third = upload([{ name: 'main.tex' }]);
+    await hang.entered(2);
+    hang.releaseAll();
+    expect((await third).statusCode).toBe(202);
+    expect(queue.added).toHaveLength(2);
+  });
+
+  it('el contador se libera también cuando la subida falla', async () => {
+    await app.close();
+    app = await buildApp({
+      compilations: { queue, storage: createLocalCompilationsStorage(root), config: { ...baseConfig(root), maxConcurrentUploads: 1 } },
+    });
+    for (let i = 0; i < 3; i++) {
+      expect((await upload([{ name: 'otro.tex' }])).statusCode).toBe(400);
+    }
+    expect((await upload([{ name: 'main.tex' }])).statusCode).toBe(202);
+  });
+
+  it('por defecto admite 4 subidas a la vez y rechaza la quinta', async () => {
+    await app.close();
+    const hang = hangingStorage();
+    app = await buildApp({ compilations: { queue, storage: hang.storage, config: baseConfig(root) } });
+    const inFlight = Array.from({ length: 4 }, () => upload([{ name: 'main.tex' }]));
+    await hang.entered(4);
+    const fifth = await upload([{ name: 'main.tex' }]);
+    expect(fifth.statusCode).toBe(503);
+    expectErrorShape(fifth.json(), 'queue_full');
+    hang.releaseAll();
+    for (const res of await Promise.all(inFlight)) expect(res.statusCode).toBe(202);
+  });
+});
+
+describe('POST /compilations: Content-Length declarado', () => {
+  async function startSpy(): Promise<{ saved: number }> {
+    await app.close();
+    const real = createLocalCompilationsStorage(root);
+    const spy = { saved: 0 };
+    app = await buildApp({
+      compilations: {
+        queue,
+        config: baseConfig(root),
+        storage: {
+          ...real,
+          saveInputs: async (...args) => {
+            spy.saved++;
+            return real.saveInputs(...args);
+          },
+        },
+      },
+    });
+    return spy;
+  }
+
+  it('mayor que maxTotalBytes + 1 MiB → 413 payload_too_large sin llamar a saveInputs', async () => {
+    const spy = await startSpy();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/compilations',
+      headers: { 'content-type': 'multipart/form-data; boundary=x', 'content-length': String(51 * MB + 1) },
+      payload: '--x--',
+    });
+    expect(res.statusCode).toBe(413);
+    expectErrorShape(res.json(), 'payload_too_large');
+    expect(spy.saved).toBe(0);
+    expect(queue.added).toEqual([]);
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it('exactamente maxTotalBytes + 1 MiB no se rechaza por Content-Length', async () => {
+    const spy = await startSpy();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/compilations',
+      headers: { 'content-type': 'multipart/form-data; boundary=x', 'content-length': String(51 * MB) },
+      payload: '--x--',
+    });
+    expect(res.statusCode).not.toBe(413);
+    expect(spy.saved).toBe(0);
+  });
+});
+
+describe('POST /compilations: espacio libre', () => {
+  async function startWithFree(freeBytes: (path: string) => Promise<number>, minFreeBytes?: number) {
+    await app.close();
+    const real = createLocalCompilationsStorage(root);
+    const spy = { saved: 0 };
+    app = await buildApp({
+      compilations: {
+        queue,
+        config: { ...baseConfig(root), ...(minFreeBytes === undefined ? {} : { minFreeBytes }) },
+        freeBytes,
+        storage: {
+          ...real,
+          saveInputs: async (...args) => {
+            spy.saved++;
+            return real.saveInputs(...args);
+          },
+        },
+      },
+    });
+    return spy;
+  }
+
+  it('por debajo del mínimo → 507 insufficient_storage con Retry-After y sin escribir nada', async () => {
+    const paths: string[] = [];
+    const spy = await startWithFree(async (path) => (paths.push(path), 99), 100);
+    const res = await upload([{ name: 'main.tex' }]);
+    expect(res.statusCode).toBe(507);
+    expectErrorShape(res.json(), 'insufficient_storage');
+    expect(res.headers['retry-after']).toBeDefined();
+    expect(paths).toEqual([root]);
+    expect(spy.saved).toBe(0);
+    expect(queue.added).toEqual([]);
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it('si freeBytes lanza → 507', async () => {
+    const spy = await startWithFree(async () => {
+      throw new Error('ENOENT: statfs');
+    }, 100);
+    const res = await upload([{ name: 'main.tex' }]);
+    expect(res.statusCode).toBe(507);
+    expectErrorShape(res.json(), 'insufficient_storage');
+    expect(res.body).not.toContain('statfs');
+    expect(spy.saved).toBe(0);
+  });
+
+  it.each([100, 101])('con %i bytes libres y mínimo 100 → 202', async (free) => {
+    await startWithFree(async () => free, 100);
+    const res = await upload([{ name: 'main.tex' }]);
+    expect(res.statusCode).toBe(202);
+  });
+
+  it('sin minFreeBytes no se llama a freeBytes', async () => {
+    let calls = 0;
+    await startWithFree(async () => (calls++, 0));
+    const res = await upload([{ name: 'main.tex' }]);
+    expect(res.statusCode).toBe(202);
+    expect(calls).toBe(0);
+  });
+});

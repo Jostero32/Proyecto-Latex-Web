@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { buildApp } from '../../app';
-import { COLLAB_PATH } from './websocket';
+import { COLLAB_MAX_MESSAGE_BYTES, COLLAB_PATH } from './websocket';
 
 let app: FastifyInstance;
 let base: string;
@@ -158,23 +158,93 @@ describe('apps/server: API REST y colaboración en el mismo puerto', () => {
   });
 });
 
-describe('upgrade con una URL que no se puede interpretar', () => {
-  /** Manda una petición de upgrade cruda y devuelve la primera línea de la respuesta. */
-  function rawUpgrade(target: string): Promise<string> {
-    return new Promise((resolve) => {
-      const [host, port] = base.split(':');
-      const socket = connect_(Number(port), host ?? '127.0.0.1', () => {
-        socket.write(
-          `GET ${target} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
-            'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n',
-        );
-      });
-      let response = '';
-      socket.on('data', (chunk: Buffer) => (response += chunk.toString()));
-      socket.on('close', () => resolve(response.split('\r\n')[0] ?? ''));
-      socket.on('error', () => resolve(response.split('\r\n')[0] ?? ''));
+/**
+ * Manda una petición de upgrade cruda y devuelve la primera línea de la respuesta. `headers`
+ * reemplaza o agrega cabeceras (valor `null` = omitir); por defecto, Host: x como antes.
+ */
+function rawUpgrade(target: string, headers: Record<string, string | null> = {}): Promise<string> {
+  return new Promise((resolve) => {
+    const [host, port] = base.split(':');
+    const merged: Record<string, string | null> = {
+      Host: 'x',
+      Upgrade: 'websocket',
+      Connection: 'Upgrade',
+      'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      'Sec-WebSocket-Version': '13',
+      ...headers,
+    };
+    const head = Object.entries(merged)
+      .filter((entry): entry is [string, string] => entry[1] !== null)
+      .map(([name, value]) => `${name}: ${value}\r\n`)
+      .join('');
+    const socket = connect_(Number(port), host ?? '127.0.0.1', () => {
+      socket.write(`GET ${target} HTTP/1.1\r\n${head}\r\n`);
     });
-  }
+    let response = '';
+    const finish = () => {
+      socket.destroy();
+      resolve(response.split('\r\n')[0] ?? '');
+    };
+    socket.on('data', (chunk: Buffer) => {
+      response += chunk.toString();
+      if (response.includes('\r\n')) finish();
+    });
+    socket.on('close', finish);
+    socket.on('error', finish);
+  });
+}
+
+describe('upgrade: Host y Origin', () => {
+  it('Host evil.com → 403', async () => {
+    expect(await rawUpgrade(COLLAB_PATH, { Host: 'evil.com' })).toBe('HTTP/1.1 403 Forbidden');
+  });
+
+  it('sin Host permitido pero con Origin válido → 403 (el Host manda)', async () => {
+    expect(await rawUpgrade(COLLAB_PATH, { Host: 'evil.com', Origin: 'http://localhost:5173' })).toBe(
+      'HTTP/1.1 403 Forbidden',
+    );
+  });
+
+  it.each(['http://evil.com', 'null', 'http://localhost:5174'])('Origin %s → 403', async (origin) => {
+    expect(await rawUpgrade(COLLAB_PATH, { Host: base, Origin: origin })).toBe('HTTP/1.1 403 Forbidden');
+  });
+
+  it.each(['http://localhost:5173', 'http://127.0.0.1:5173'])('Origin %s → 101', async (origin) => {
+    expect(await rawUpgrade(COLLAB_PATH, { Host: base, Origin: origin })).toMatch(/^HTTP\/1\.1 101/);
+  });
+
+  it('sin Origin → 101', async () => {
+    expect(await rawUpgrade(COLLAB_PATH, { Host: base })).toMatch(/^HTTP\/1\.1 101/);
+  });
+
+  it('el servidor sigue respondiendo tras los rechazos', async () => {
+    await rawUpgrade(COLLAB_PATH, { Host: 'evil.com' });
+    expect((await fetch(`http://${base}/health`)).status).toBe(200);
+  });
+});
+
+describe('tamaño máximo de mensaje', () => {
+  it(`un mensaje mayor que ${COLLAB_MAX_MESSAGE_BYTES} bytes cierra la conexión con 1009`, async () => {
+    const { result, socket } = await connect(COLLAB_PATH);
+    expect(result).toBe('open');
+    const closed = new Promise<number>((resolve) => socket.addEventListener('close', (e) => resolve(e.code)));
+    socket.send(new Uint8Array(COLLAB_MAX_MESSAGE_BYTES + 1));
+    expect(await closed).toBe(1009);
+  });
+
+  it('un mensaje dentro del límite no cierra la conexión', async () => {
+    const { result, socket } = await connect(COLLAB_PATH);
+    expect(result).toBe('open');
+    let closedCode: number | null = null;
+    socket.addEventListener('close', (e) => (closedCode = e.code));
+    socket.send(new Uint8Array(1024));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(closedCode).toBeNull();
+    socket.close();
+  });
+});
+
+describe('upgrade con una URL que no se puede interpretar', () => {
 
   // Regresión: `new URL()` lanzaba fuera del try y la promesa rechazada sin manejar terminaba el
   // proceso (API y colaboración caídas con una sola petición).

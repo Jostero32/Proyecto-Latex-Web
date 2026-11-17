@@ -1,6 +1,7 @@
 // Rutas /compilations. Ver docs/specs/compilacion.md, "Endpoints".
 import { randomUUID } from 'node:crypto';
-import type { FastifyError, FastifyInstance } from 'fastify';
+import { statfs } from 'node:fs/promises';
+import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   isCompilationId,
   type ArtifactKind,
@@ -18,13 +19,21 @@ export interface CompilationsDeps {
   queue: CompileQueue;
   storage: CompilationsStorage;
   config: CompilationsConfig;
+  /** Bytes libres en una ruta; inyectable para tests. Por defecto, statfs. */
+  freeBytes?: (path: string) => Promise<number>;
 }
 
 /** Segundos sugeridos al cliente para reintentar cuando la cola está llena o no responde. */
 const RETRY_AFTER_SECONDS = 30;
+/** Margen sobre maxTotalBytes por los encabezados y separadores del multipart. */
+const MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
+const DEFAULT_MAX_CONCURRENT_UPLOADS = 4;
 
 export async function compilationsRoutes(app: FastifyInstance, deps: CompilationsDeps): Promise<void> {
   const { queue, storage, config } = deps;
+  const freeBytes = deps.freeBytes ?? statfsFreeBytes;
+  const maxConcurrentUploads = config.maxConcurrentUploads ?? DEFAULT_MAX_CONCURRENT_UPLOADS;
+  let uploadsInFlight = 0;
   const fail = (reply: Parameters<typeof sendError>[0], status: number, code: CompilationErrorCode, message: string) =>
     sendError(reply, status, code, message);
 
@@ -57,6 +66,42 @@ export async function compilationsRoutes(app: FastifyInstance, deps: Compilation
       return fail(reply, 503, 'queue_full', 'El servicio de compilación no está disponible');
     }
 
+    // Subidas en curso: cada una ocupa hasta ~maxTotalBytes de memoria y el tope de la cola no
+    // las cuenta (todavía no están encoladas).
+    if (uploadsInFlight >= maxConcurrentUploads) {
+      reply.header('Retry-After', String(RETRY_AFTER_SECONDS));
+      return fail(reply, 503, 'queue_full', 'Hay demasiadas subidas en curso; reintenta en unos segundos');
+    }
+    // Rechazo antes de leer el cuerpo si ya se declara demasiado grande.
+    const declared = Number(request.headers['content-length']);
+    if (Number.isFinite(declared) && declared > config.upload.maxTotalBytes + MULTIPART_OVERHEAD_BYTES) {
+      return fail(reply, 413, 'payload_too_large', `El proyecto supera ${config.upload.maxTotalBytes} bytes en total`);
+    }
+    // Piso de espacio libre: el tope de la cola no acota los bytes retenidos (PDF y log durante el
+    // TTL), así que se deja de aceptar antes de llenar el disco.
+    if (config.minFreeBytes !== undefined) {
+      let free: number;
+      try {
+        free = await freeBytes(config.storageDir);
+      } catch (error) {
+        request.log.error({ err: error }, 'no se pudo consultar el espacio libre');
+        free = 0;
+      }
+      if (free < config.minFreeBytes) {
+        reply.header('Retry-After', String(RETRY_AFTER_SECONDS));
+        return fail(reply, 507, 'insufficient_storage', 'No hay espacio suficiente para aceptar más compilaciones');
+      }
+    }
+
+    uploadsInFlight++;
+    try {
+      return await acceptUpload(request, reply);
+    } finally {
+      uploadsInFlight--;
+    }
+  });
+
+  async function acceptUpload(request: FastifyRequest, reply: FastifyReply) {
     let upload;
     try {
       upload = validateUpload(await readUpload(request, config.upload));
@@ -99,7 +144,7 @@ export async function compilationsRoutes(app: FastifyInstance, deps: Compilation
       ignoredFiles: upload.ignoredFiles,
     };
     return reply.code(202).header('Location', `/compilations/${id}`).send(body);
-  });
+  }
 
   app.get<{ Params: { id: string } }>('/compilations/:id', async (request, reply) => {
     const { id } = request.params;
@@ -145,3 +190,9 @@ const ARTIFACT_MESSAGES: Record<ArtifactErrorCode, (config: CompilationsConfig) 
   pdf_too_large: (config) => `El PDF superó el tamaño máximo de ${config.maxPdfBytes} bytes y no se guardó`,
   expired: () => 'El archivo ya no está disponible: venció el tiempo de retención',
 };
+
+/** Bytes disponibles para usuarios sin privilegios en el sistema de archivos de `path`. */
+async function statfsFreeBytes(path: string): Promise<number> {
+  const stats = await statfs(path);
+  return stats.bavail * stats.bsize;
+}

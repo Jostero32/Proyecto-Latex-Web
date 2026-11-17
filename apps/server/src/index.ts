@@ -27,8 +27,10 @@ async function main(): Promise<void> {
         storage: createLocalCompilationsStorage(config.compilations.storageDir),
         config: config.compilations,
       },
+      security: config.security,
     },
-    { logger: true },
+    // requestTimeout: tiempo máximo para recibir una petición completa (contra subidas lentas).
+    { logger: true, requestTimeout: config.requestTimeoutMs },
   );
   app.addHook('onClose', async () => {
     await queue.close();

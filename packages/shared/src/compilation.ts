@@ -77,6 +77,7 @@ export type CompilationErrorCode =
   | 'artifact_not_available'
   | 'pdf_too_large'
   | 'expired'
+  | 'insufficient_storage'
   | 'internal_error';
 
 /** Nombre de la carpeta de almacenamiento por defecto dentro del directorio temporal del sistema. */
