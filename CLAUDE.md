@@ -23,10 +23,10 @@ Todo código nuevo sigue estas reglas.
 
 apps/server/src:
 - `index.ts`: solo arranque (config, `buildApp`, listen, apagado)
-- `app.ts`: `buildApp`, que arma la instancia de Fastify y registra plugins y módulos
+- `app.ts`: `buildApp`, que arma la instancia de Fastify y registra plugins y funcionalidades
 - `config.ts`: configuración; único lugar donde se lee `process.env`
-- `plugins/`: plugins de Fastify compartidos entre módulos (p. ej. multipart)
-- `lib/`: utilidades sin lógica de negocio (no importan de `modules/`)
+- `plugins/`: plugins de Fastify compartidos entre funcionalidades (p. ej. multipart)
+- `lib/`: utilidades sin lógica de negocio (no importan de `features/`)
 - `features/<funcionalidad>/`: todo lo de una funcionalidad. Los archivos se nombran por su rol, sin
   repetir el nombre de la carpeta (`features/compilations/routes.ts`, `storage.ts`, `upload.ts`).
   `index.ts` es su API pública: desde fuera de la carpeta se importa solo `index.ts`, nunca un
@@ -42,7 +42,7 @@ Tests:
 - Unitarios: al lado de su archivo, como `<archivo>.test.ts`. Corren con `pnpm test`.
 - De integración: en `apps/<app>/test/integration/`. Son los que necesitan servicios externos
   (Docker, Redis, Postgres, MinIO) o son lentos. Corren con `pnpm test:integration`.
-- No crear carpetas vacías: `plugins/`, `lib/` y los módulos aparecen con su primer archivo.
+- No crear carpetas vacías: `plugins/`, `lib/` y cada `features/<funcionalidad>/` aparecen con su primer archivo.
 
 ## Reglas
 - Antes de una funcionalidad nueva, debe existir su spec en docs/specs/

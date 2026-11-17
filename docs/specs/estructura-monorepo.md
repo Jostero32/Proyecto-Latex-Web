@@ -29,7 +29,7 @@ calidad) para que las funcionalidades futuras se desarrollen sobre una base com�
 | `apps/web` | `@latexweb/web` | Vite + React que muestra solo un título |
 
 - TypeScript: `module: ESNext`, `moduleResolution: Bundler`. Las apps de Node se ejecutan con `tsx` en dev.
-- Colaboración en `apps/server` (`src/modules/collab/collab.websocket.ts`): se usa `new Hocuspocus()` en lugar de su clase `Server`,
+- Colaboración en `apps/server` (`src/features/collab/websocket.ts`): se usa `new Hocuspocus()` en lugar de su clase `Server`,
   para no crear un segundo servidor HTTP. El evento `upgrade` del servidor de Fastify pasa las conexiones
   a `/collab` al adaptador de Node de `crossws`, igual que hace internamente la clase `Server` de Hocuspocus
   4.8. Las demás rutas responden 404. `crossws` va como dependencia directa, fijada en la misma versión
@@ -56,7 +56,7 @@ Cada paquete tiene `package.json`, `tsconfig.json` y `src/index.ts` (en web: `sr
 - [ ] `pnpm typecheck`, `pnpm lint` y `pnpm test` salen con código 0
 - [ ] `docker compose up -d` deja postgres, redis y minio en estado `healthy`
 - [ ] `GET /health` de `apps/server` responde `{ "ok": true }`, y en el mismo puerto `/collab` acepta
-      WebSocket y sincroniza un documento Yjs entre dos clientes (`apps/server/src/modules/collab/collab.websocket.test.ts`)
+      WebSocket y sincroniza un documento Yjs entre dos clientes (`apps/server/src/features/collab/websocket.test.ts`)
 
 ## 7. Riesgos
 - MinIO dejó de publicar imágenes de la edición community: `minio/minio` ya no está en Docker Hub y quay.io

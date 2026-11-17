@@ -65,7 +65,7 @@ antes de colaboración para que el WebSocket nazca con la distinción lector/edi
 
 ## 7. colaboracion
 Autenticación y autorización en el manejador de upgrade de `/collab` (sesión + permiso sobre el
-documento; ya marcado en `collab.websocket.ts`), persistencia de los documentos Yjs en Postgres y
+documento; ya marcado en `features/collab/websocket.ts`), persistencia de los documentos Yjs en Postgres y
 sincronización Yjs ↔ archivos: lo que se compila tiene que ser el estado actual del documento
 colaborativo, no una copia vieja en MinIO. Límites de tamaño de mensaje y de documento.
 

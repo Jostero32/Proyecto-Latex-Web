@@ -47,7 +47,7 @@ worker es `apps/compiler`, un proceso aparte.
 - Estructura: `<root>/<id>/input/**` (lo escribe la API), `<root>/<id>/out/` (lo monta el contenedor) y
   `<root>/<id>/output.{pdf,log}` (los publica el worker con un rename atómico).
 - Interfaces chicas por rol, para reemplazarlas por MinIO después sin tocar las rutas ni el processor:
-  - API (`apps/server/src/modules/compilations/compilations.storage.ts`): `saveInputs(id, files)`,
+  - API (`apps/server/src/features/compilations/storage.ts`): `saveInputs(id, files)`,
     `openArtifact(id, kind)` y `remove(id)`.
   - Worker (`apps/compiler/src/workspace/workspace.ts`): `prepareInputs(id)`, `publishArtifacts(id)`,
     `cleanupWork(id)` y `sweepExpired(maxAgeMs)`.
@@ -218,8 +218,8 @@ Los errores tienen la forma `{ error: CompilationErrorCode, message }`.
 - `apps/compiler/src/`: `docker/docker-args.ts` (+ test), `docker/runner.ts` (+ test),
   `workspace/workspace.ts` (+ test) y `worker/processor.ts` (+ test)
 - `apps/compiler/test/integration/compile.test.ts`
-- `apps/server/src/modules/compilations/`: `compilations.routes.ts`, `compilations.storage.ts` y
-  `compilations.upload.ts`, cada uno con su `.test.ts` al lado
+- `apps/server/src/features/compilations/`: `index.ts`, `routes.ts`, `storage.ts`, `upload.ts`, `queue.ts` y
+  `status.ts`, cada uno con su `.test.ts` al lado
 - `apps/server/src/plugins/multipart.ts` (registro de `@fastify/multipart` con sus límites)
 - `.gitattributes` con `*.sh text eol=lf` y `Dockerfile text eol=lf` (con CRLF, `/bin/sh` falla en el
   contenedor)
@@ -266,7 +266,7 @@ Al terminar cada paso se corren `pnpm test`, `pnpm typecheck` y `pnpm lint`.
    cuando no hay imagen.
 7. **API (en `apps/server`):** `buildApp(deps)`, configuración, storage y subida, con tests de `inject`,
    una cola falsa y un directorio temporal. Incluye comprobar que `preservePath` funciona y que
-   `collab.websocket.test.ts` sigue pasando.
+   `features/collab/websocket.test.ts` sigue pasando.
 8. **Rutas de estado y descarga:** 404, 409, 410 y cabeceras, con sus tests.
 9. **Prueba de punta a punta:** `docker compose up -d redis`, `pnpm dev`, y con curl subir `con-imagenes` y
    `xelatex-fuentes`, consultar el estado y descargar el PDF y el log. Actualizar `.env.example`.
