@@ -15,6 +15,9 @@ momento (CLAUDE.md, "Forma de trabajo"). Ordenado por prioridad dentro de cada s
 | baja | compilación | biber usa 49 de sus 83 bibliotecas nativas precalentadas; una función rara que necesite otra falla con "Read-only file system". |
 | media | proyectos | **Subidas en memoria:** `POST /files` y la importación de zip leen todo en memoria (hasta `PROJECT_MAX_BYTES` por petición). Con varias a la vez el server puede quedarse sin RAM: limitar las subidas concurrentes o pasar a archivos temporales. |
 | media | compilación | **Sin límite de compilaciones por usuario:** solo hay un tope global de la cola (`COMPILE_MAX_QUEUED`); un usuario puede llenarla. Rate limit por usuario (cuotas, spec `cierre`). |
+| media | colaboración | **Sin tope de conexiones WebSocket por usuario:** cada una puede abrir documentos de sus proyectos y ocupar memoria. Limitar por usuario e IP. |
+| baja | api | Swagger UI está encendido por defecto (`API_DOCS`): en despliegue, apagarlo o dejarlo detrás de auth (spec `cierre`). |
+| baja | web | Los mensajes de `diagnostics` y los nombres de archivos vienen del usuario: la web los muestra como texto, nunca como HTML. |
 | baja | compilación | El worker usa las credenciales raíz de MinIO: un usuario propio con permiso solo sobre `compilations/`. |
 | baja | api | Swagger UI "Try it out" con POST desde `localhost:3000` responde 403: ese origen no está en `ALLOWED_ORIGINS` (a propósito). Con el proxy de Vite (frontend) la UI queda en el mismo origen que la web. |
 | baja | colaboración | **Cerrar sesión no corta los WebSockets abiertos** de esa sesión: siguen hasta que se cierran solos. Cerrarlos en logout (por usuario, como al quitar permisos). |

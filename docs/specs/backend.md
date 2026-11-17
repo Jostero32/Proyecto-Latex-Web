@@ -125,14 +125,14 @@ Al final: verificación en vivo en el stack de compose y `/security-review`.
 
 ## 5. Criterios de aceptación
 - [x] `docker compose up -d --build` con la base vacía crea las tablas solo y no tiene servicio `migrate`.
-- [ ] Crear un proyecto, importar los 6 fixtures como zip, compilarlos y bajar PDF, log y synctex: los 6 dan
+- [x] Crear un proyecto, importar los 6 fixtures como zip, compilarlos y bajar PDF, log y synctex: los 6 dan
       `success`. Un error de LaTeX aparece en `diagnostics` con archivo y línea.
 - [x] Un no miembro recibe 404 en el proyecto, los archivos, la compilación y sus artefactos. Un lector
       recibe 403 al escribir y no puede escribir por WebSocket. Un editor no gestiona miembros.
 - [x] Una edición por WebSocket se ve en `GET /files/:id` y en la siguiente compilación.
 - [x] Un zip con `../`, con un symlink, con demasiadas entradas o que se infla por encima del tope se rechaza
       sin escribir nada.
-- [ ] No quedan referencias a Prisma, a `apps/` ni a `packages/`. `pnpm test`, `typecheck`, `lint`,
+- [x] No quedan referencias a Prisma, a `apps/` ni a `packages/`. `pnpm test`, `typecheck`, `lint`,
       `test:compile` y CI pasan.
 
 ## 6. Riesgos
