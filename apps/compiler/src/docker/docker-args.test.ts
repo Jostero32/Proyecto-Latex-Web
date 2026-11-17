@@ -153,6 +153,73 @@ describe('montajes', () => {
   });
 });
 
+describe('modo volumen (storageVolume)', () => {
+  const VOLUME = 'latexweb-compile-storage';
+  const withoutMounts = (args: string[]): string[] =>
+    args.filter((arg, i) => arg !== '--mount' && args[i - 1] !== '--mount');
+
+  it('hay exactamente dos --mount de tipo volume con subpath del id', () => {
+    const args = build({ storageVolume: VOLUME });
+    expect(valuesOf(args, '--mount')).toEqual([
+      `type=volume,source=${VOLUME},target=/in,volume-subpath=${ID}/input,readonly`,
+      `type=volume,source=${VOLUME},target=/out,volume-subpath=${ID}/out`,
+    ]);
+  });
+
+  it('/in es de solo lectura y /out no', () => {
+    const [input, output] = valuesOf(build({ storageVolume: VOLUME }), '--mount') as [string, string];
+    expect(input.split(',')).toContain('readonly');
+    expect(output.split(',')).not.toContain('readonly');
+  });
+
+  it('no aparece type=bind ni las rutas inputDir/outputDir', () => {
+    const args = build({ storageVolume: VOLUME });
+    expect(args.some((arg) => arg.includes('type=bind'))).toBe(false);
+    expect(args.some((arg) => arg.includes(INPUT_DIR) || arg.includes(OUTPUT_DIR))).toBe(false);
+  });
+
+  it('los subpaths usan exactamente el compilationId', () => {
+    const other = '223e4567-e89b-42d3-a456-426614174000';
+    const mounts = valuesOf(build({ storageVolume: VOLUME, compilationId: other }), '--mount');
+    expect(mounts.map((m) => /volume-subpath=([^,]*)/.exec(m)?.[1])).toEqual([`${other}/input`, `${other}/out`]);
+  });
+
+  it('los demás flags son idénticos a los del modo bind', () => {
+    expect(withoutMounts(build({ storageVolume: VOLUME }))).toEqual(withoutMounts(build()));
+  });
+
+  it('el orden final no cambia: imagen, opciones, motor y mainFile al final', () => {
+    const args = build({ storageVolume: VOLUME, engine: 'xelatex', mainFile: 'docs/tesis.tex' });
+    const imageIndex = args.indexOf('latexweb-texlive:tl2026-1');
+    expect(args.slice(imageIndex + 1)).toEqual([
+      '-norc',
+      '-no-shell-escape',
+      '-interaction=nonstopmode',
+      '-file-line-error',
+      '-jobname=output',
+      '-pdfxe',
+      'docs/tesis.tex',
+    ]);
+    expect(args[imageIndex - 2]).toBe('--mount');
+    expect(args[imageIndex - 1]).toBe(`type=volume,source=${VOLUME},target=/out,volume-subpath=${ID}/out`);
+  });
+
+  it.each(['', '-vol', 'a,b', 'a=b', 'a/b', 'a b', '"a"', '.vol', 'a\nb', '\n'])(
+    'rechaza el nombre de volumen %j',
+    (storageVolume) => {
+      throwsDockerArgsError({ storageVolume });
+    },
+  );
+
+  it.each(['latexweb-compile-storage', 'vol_1', 'v.2'])('acepta el nombre de volumen %s', (storageVolume) => {
+    expect(valuesOf(build({ storageVolume }), '--mount')[0]).toContain(`source=${storageVolume},`);
+  });
+
+  it('storageVolume undefined equivale a no pasar la opción', () => {
+    expect(build({ storageVolume: undefined })).toEqual(build());
+  });
+});
+
 describe('tmpfs y usuario del contenedor', () => {
   const tmpfs = (args: string[], target: string): string => {
     const found = valuesOf(args, '--tmpfs').find((v) => v.startsWith(`${target}:`));

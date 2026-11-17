@@ -33,8 +33,9 @@ const MB = 1024 * 1024;
 
 export function loadConfig(env: Env = process.env): ServerConfig {
   return {
-    // Solo localhost: en esta etapa el servidor no se expone fuera de la máquina.
-    host: '127.0.0.1',
+    // Por defecto solo localhost. En docker compose es 0.0.0.0 dentro del contenedor, y compose lo
+    // publica solo en 127.0.0.1 del host (ver docs/specs/docker-compose.md).
+    host: env.SERVER_HOST === undefined || env.SERVER_HOST === '' ? '127.0.0.1' : env.SERVER_HOST,
     port: envPositiveInteger(env, 'SERVER_PORT', 3000),
     redisUrl: env.REDIS_URL ?? 'redis://127.0.0.1:6379',
     compilations: {

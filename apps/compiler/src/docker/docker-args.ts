@@ -43,6 +43,13 @@ export interface DockerRunOptions {
   /** Tamaño de los tmpfs /tmp y /work, p. ej. `256m`. */
   tmpfsSize: string;
   user: Readonly<ContainerUser>;
+  /**
+   * Modo volumen (worker dentro de docker compose, ver docs/specs/docker-compose.md): si está
+   * definido, /in y /out se montan desde este volumen con nombre usando volume-subpath
+   * `<id>/input` y `<id>/out`, en lugar de inputDir/outputDir (que son rutas del contenedor del
+   * worker y el daemon del host no puede montar).
+   */
+  storageVolume?: string | undefined;
 }
 
 /** Nombre del contenedor; permite `docker kill` / `docker rm -f` idempotentes por compilación. */
@@ -77,6 +84,7 @@ export function buildDockerRunArgs(options: DockerRunOptions): string[] {
   assertImage(image);
   assertMountSource(inputDir, 'inputDir');
   assertMountSource(outputDir, 'outputDir');
+  if (options.storageVolume !== undefined) assertVolumeName(options.storageVolume);
   assertPositiveInteger(options.timeoutSeconds, 'timeoutSeconds');
   assertPositiveInteger(options.pidsLimit, 'pidsLimit');
   assertCpus(options.cpus);
@@ -114,9 +122,9 @@ export function buildDockerRunArgs(options: DockerRunOptions): string[] {
     '--user', `${user.uid}:${user.gid}`,
     // Entorno: solo la lista blanca, con valor explícito
     ...CONTAINER_ENV_NAMES.flatMap((key) => ['--env', `${key}=${env[key]}`]),
-    // Montajes: --mount y no -v, que confunde la `C:` de las rutas de Windows
-    '--mount', `type=bind,source=${inputDir},target=/in,readonly`,
-    '--mount', `type=bind,source=${outputDir},target=/out`,
+    // Montajes: exactamente dos, /in de solo lectura. --mount y no -v, que confunde la `C:` de las
+    // rutas de Windows.
+    ...mountArgs(compilationId, inputDir, outputDir, options.storageVolume),
     image,
     // Argumentos del script de entrada (latexweb-compile.sh), que solo acepta exactamente estos
     '-norc',
@@ -127,6 +135,28 @@ export function buildDockerRunArgs(options: DockerRunOptions): string[] {
     ENGINE_FLAGS[engine],
     mainFile,
   ];
+}
+
+function mountArgs(id: string, inputDir: string, outputDir: string, volume: string | undefined): string[] {
+  if (volume === undefined) {
+    return [
+      '--mount', `type=bind,source=${inputDir},target=/in,readonly`,
+      '--mount', `type=bind,source=${outputDir},target=/out`,
+    ];
+  }
+  // Los subpaths salen solo del id ya validado como uuid. Docker además rechaza escapar del
+  // volumen con `..`, rutas absolutas o symlinks (verificado en Docker 29.5.3).
+  return [
+    '--mount', `type=volume,source=${volume},target=/in,volume-subpath=${id}/input,readonly`,
+    '--mount', `type=volume,source=${volume},target=/out,volume-subpath=${id}/out`,
+  ];
+}
+
+// Nombre de volumen de Docker. Sin `,`, `=` ni `/`, que cambiarían el significado de --mount.
+const VOLUME_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+
+function assertVolumeName(volume: string): void {
+  if (!VOLUME_NAME.test(volume)) throw new DockerArgsError(`nombre de volumen inválido: ${volume}`);
 }
 
 export class DockerArgsError extends Error {

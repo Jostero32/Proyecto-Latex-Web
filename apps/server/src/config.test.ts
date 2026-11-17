@@ -19,6 +19,14 @@ describe('loadConfig', () => {
     });
   });
 
+  it('SERVER_HOST vacía usa 127.0.0.1', () => {
+    expect(loadConfig({ SERVER_HOST: '' }).host).toBe('127.0.0.1');
+  });
+
+  it('SERVER_HOST=0.0.0.0 se respeta', () => {
+    expect(loadConfig({ SERVER_HOST: '0.0.0.0' }).host).toBe('0.0.0.0');
+  });
+
   it('lee cada variable', () => {
     const config = loadConfig({
       SERVER_PORT: '8080',

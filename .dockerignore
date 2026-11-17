@@ -1,0 +1,15 @@
+# Contexto de build del Dockerfile de la raíz (apps). La imagen de TeX Live usa su propio contexto
+# (apps/compiler/docker), al que esto no se aplica.
+**/node_modules
+**/dist
+**/coverage
+.git
+.env
+.env.*
+!.env.example
+.claude
+docs
+fixtures
+apps/compiler/docker
+apps/*/test
+**/*.test.ts

@@ -1,0 +1,101 @@
+// Integración del modo volumen (docker compose): las compilaciones montan su subcarpeta de un
+// volumen con nombre (volume-subpath) en lugar de rutas del host. Ver docs/specs/docker-compose.md.
+//
+// El test corre en el host, así que no puede escribir en el volumen directamente: un contenedor
+// auxiliar copia el fixture a <id>/input y lee después <id>/out. Se salta sin Docker o sin la
+// imagen, salvo con LATEXWEB_REQUIRE_DOCKER=1.
+import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildDockerRunArgs, containerName } from '../../src/docker/docker-args';
+import { classifyRun, runContainer } from '../../src/docker/runner';
+
+const IMAGE = process.env.COMPILE_IMAGE ?? 'latexweb-texlive:tl2026-1';
+const FIXTURES = fileURLToPath(new URL('../../../../fixtures/latex/', import.meta.url));
+const CANARY = 'LATEXWEB_CANARY';
+
+const docker = (args: string[]) => spawnSync('docker', args, { encoding: 'utf8' });
+const dockerReady = docker(['info']).status === 0 && docker(['image', 'inspect', IMAGE]).status === 0;
+if (process.env.LATEXWEB_REQUIRE_DOCKER === '1' && !dockerReady) {
+  throw new Error(`LATEXWEB_REQUIRE_DOCKER=1 pero Docker no responde o falta la imagen ${IMAGE}`);
+}
+
+describe.skipIf(!dockerReady)('modo volumen con Docker real', () => {
+  const volume = `latexweb-test-${randomUUID().slice(0, 8)}`;
+
+  beforeAll(() => {
+    expect(docker(['volume', 'create', volume]).status).toBe(0);
+    process.env[CANARY] = `secreto-${randomUUID()}`;
+  });
+
+  afterAll(() => {
+    delete process.env[CANARY];
+    docker(['volume', 'rm', '-f', volume]);
+  });
+
+  /** Ejecuta un comando de shell en un contenedor auxiliar con el volumen en /data. */
+  function inVolume(script: string, extraMounts: string[] = []) {
+    return docker(['run', '--rm', '-v', `${volume}:/data`, ...extraMounts, '--entrypoint', 'sh', IMAGE, '-c', script]);
+  }
+
+  async function compile(fixture: string) {
+    const id = randomUUID();
+    // Lo que harían server (input/) y prepareInputs del worker en contenedor (out/ del uid 1000).
+    const prep = inVolume(
+      `mkdir -p /data/${id}/input /data/${id}/out && cp -R /src/. /data/${id}/input/ && chown 1000:1000 /data/${id}/out`,
+      ['--mount', `type=bind,source=${FIXTURES}${fixture},target=/src,readonly`],
+    );
+    expect(prep.status, prep.stderr).toBe(0);
+
+    const run = await runContainer({
+      containerName: containerName(id),
+      timeoutSeconds: 60,
+      args: buildDockerRunArgs({
+        compilationId: id,
+        image: IMAGE,
+        engine: 'pdflatex',
+        mainFile: 'main.tex',
+        // En modo volumen no se montan; solo se validan como rutas absolutas.
+        inputDir: `/data/compilations/${id}/input`,
+        outputDir: `/data/compilations/${id}/out`,
+        timeoutSeconds: 60,
+        cpus: 1,
+        memory: '1g',
+        pidsLimit: 128,
+        tmpfsSize: '256m',
+        user: { uid: 1000, gid: 1000 },
+        storageVolume: volume,
+      }),
+    });
+    const out = inVolume(`head -c 5 /data/${id}/out/output.pdf; echo; cat /data/${id}/out/output.log`);
+    return { run, pdfHeader: out.stdout.split('\n')[0] ?? '', log: out.stdout };
+  }
+
+  it('compila articulo-simple montando /in y /out desde el volumen', async () => {
+    const { run, pdfHeader, log } = await compile('articulo-simple');
+    expect(classifyRun(run, pdfHeader === '%PDF-')).toEqual({ kind: 'outcome', outcome: 'success' });
+    expect(log).toContain('Output written on output.pdf');
+  }, 180_000);
+
+  it('malicioso: los 5 intentos quedan bloqueados también en modo volumen', async () => {
+    const { log } = await compile('malicioso');
+    expect(log).toContain('LATEXWEB-SANDBOX: FIN');
+    for (const key of ['shell-escape-nivel', 'write18-ejecucion', 'write18-etc-passwd', 'canario-entorno', 'latexmkrc-perl']) {
+      expect(log).toContain(`LATEXWEB-SANDBOX: ${key}=BLOQUEADO`);
+    }
+    expect(log).not.toContain('=VULNERABLE');
+  }, 180_000);
+
+  it('/in es de solo lectura dentro del contenedor de compilación', () => {
+    const id = randomUUID();
+    expect(inVolume(`mkdir -p /data/${id}/input`).status).toBe(0);
+    const write = docker([
+      'run', '--rm', '--user', '1000:1000',
+      '--mount', `type=volume,source=${volume},target=/in,volume-subpath=${id}/input,readonly`,
+      '--entrypoint', 'sh', IMAGE, '-c', 'touch /in/x',
+    ]);
+    expect(write.status).not.toBe(0);
+    expect(write.stderr).toMatch(/Read-only file system/);
+  }, 60_000);
+});

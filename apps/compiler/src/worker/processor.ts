@@ -24,6 +24,8 @@ export interface ProcessorDeps {
   memory: string;
   pidsLimit: number;
   tmpfsSize: string;
+  /** Modo volumen (docker compose): volumen con nombre que contiene la raíz de almacenamiento. */
+  storageVolume?: string | undefined;
   /** Inyectable para tests. */
   runContainer?: (options: RunContainerOptions) => Promise<RunContainerResult>;
   /** Registro de fallos de infraestructura (por defecto console.error). */
@@ -73,6 +75,7 @@ export function createCompileProcessor(deps: ProcessorDeps): (job: CompileJob) =
           pidsLimit: deps.pidsLimit,
           tmpfsSize: deps.tmpfsSize,
           user: deps.containerUser,
+          storageVolume: deps.storageVolume,
         }),
       });
 

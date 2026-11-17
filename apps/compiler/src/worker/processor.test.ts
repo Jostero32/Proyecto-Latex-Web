@@ -12,6 +12,7 @@ const GOOD = { compilationId: ID, engine: 'pdflatex', mainFile: 'main.tex' };
 interface Harness {
   calls: string[];
   workspace: Workspace;
+  deps: ProcessorDeps;
   prepareInputs: ReturnType<typeof vi.fn>;
   publishArtifacts: ReturnType<typeof vi.fn>;
   cleanupWork: ReturnType<typeof vi.fn>;
@@ -67,7 +68,7 @@ function setup(s: Setup = {}): Harness {
     runContainer,
     logError,
   };
-  return { calls, workspace, prepareInputs, publishArtifacts, cleanupWork, runContainer, logError, processor: createCompileProcessor(deps) };
+  return { calls, workspace, deps, prepareInputs, publishArtifacts, cleanupWork, runContainer, logError, processor: createCompileProcessor(deps) };
 }
 
 const badPayloads: Array<[string, unknown]> = [
@@ -138,6 +139,30 @@ describe('éxito', () => {
     expect(options.timeoutSeconds).toBe(42);
     expect(options.args).toContain(IMAGE);
     expect(options.args.slice(-2)).toEqual([flag, 'tesis.tex']);
+  });
+});
+
+describe('modo volumen', () => {
+  async function mountsFor(storageVolume?: string): Promise<string[]> {
+    const h = setup();
+    const processor = createCompileProcessor({ ...h.deps, storageVolume });
+    await processor({ id: ID, data: GOOD });
+    const options = h.runContainer.mock.calls[0]![0] as RunContainerOptions;
+    return options.args.flatMap((arg, i) => (arg === '--mount' ? [options.args[i + 1] as string] : []));
+  }
+
+  it('con storageVolume pasa montajes de volumen a runContainer', async () => {
+    expect(await mountsFor('latexweb-compile-storage')).toEqual([
+      `type=volume,source=latexweb-compile-storage,target=/in,volume-subpath=${ID}/input,readonly`,
+      `type=volume,source=latexweb-compile-storage,target=/out,volume-subpath=${ID}/out`,
+    ]);
+  });
+
+  it('sin storageVolume pasa montajes bind', async () => {
+    expect(await mountsFor()).toEqual([
+      `type=bind,source=/data/${ID}/input,target=/in,readonly`,
+      `type=bind,source=/data/${ID}/out,target=/out`,
+    ]);
   });
 });
 

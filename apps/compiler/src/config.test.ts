@@ -21,6 +21,7 @@ describe('valores por defecto', () => {
       ttlSeconds: 3600,
       maxPdfBytes: 50 * MB,
       maxLogBytes: 5 * MB,
+      storageVolume: undefined,
     });
   });
 
@@ -47,6 +48,20 @@ describe('valores por defecto', () => {
       maxPdfBytes: 50 * MB,
       maxLogBytes: 5 * MB,
     });
+  });
+});
+
+describe('COMPILE_STORAGE_VOLUME', () => {
+  it('definida: se lee en storageVolume', () => {
+    expect(loadConfig({ COMPILE_STORAGE_VOLUME: 'latexweb-compile-storage' }).storageVolume).toBe('latexweb-compile-storage');
+  });
+
+  it('ausente: storageVolume es undefined', () => {
+    expect(loadConfig({}).storageVolume).toBeUndefined();
+  });
+
+  it('vacía: storageVolume es undefined', () => {
+    expect(loadConfig({ COMPILE_STORAGE_VOLUME: '' }).storageVolume).toBeUndefined();
   });
 });
 
