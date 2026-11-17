@@ -13,7 +13,7 @@ integración (aserciones finas sobre el log, timeout, kill de respaldo).
 ## 1. Preparar el entorno
 
 1. Redis arriba: `docker compose up -d redis` (comprobar `docker compose ps`: `healthy`).
-2. Imagen de compilación presente: `docker image inspect latexweb-texlive:tl2026-1`. Si falta:
+2. Imagen de compilación presente: `docker image inspect latexweb-texlive:tl2026-2`. Si falta:
    `pnpm --filter @latexweb/compiler image:build` (la primera vez descarga ~2,6 GB).
 3. Servidor y worker corriendo. Si `GET http://127.0.0.1:3000/health` ya responde `{"ok":true}`,
    usar lo que está corriendo y **no** detenerlo al final. Si no:

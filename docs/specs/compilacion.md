@@ -145,7 +145,7 @@ run --rm --name latexweb-compile-<id> --label latexweb.compile=<id> --init
     - con lualatex, copia la base de nombres de luaotfload (~700 KB) al `TEXMFVAR` del tmpfs, porque
       luaotfload solo la busca ahí y si no la encuentra la regenera (~5 s por compilación);
     - publica en `/out` solo archivos regulares, aunque la compilación haya fallado.
-  - Se construye con `pnpm --filter @latexweb/compiler image:build` y genera `latexweb-texlive:tl2026-1`.
+  - Se construye con `pnpm --filter @latexweb/compiler image:build` y genera `latexweb-texlive:tl2026-2`.
     Al cambiar el Dockerfile se sube el sufijo. El worker la recibe en `COMPILE_IMAGE`.
   - Tiempos medidos con la imagen (incluye arrancar el contenedor): `articulo-simple` 1 s,
     `con-bibliografia` 3 s, `xelatex-fuentes` con lualatex 4 s.
@@ -307,7 +307,7 @@ Al terminar cada paso se corren `pnpm test`, `pnpm typecheck` y `pnpm lint`.
 ## 7. Riesgos
 **Seguridad**
 - **Socket de Docker:** quien accede a él tiene root en el host. Con `pnpm dev` el worker corre en el host;
-  con `docker compose --profile apps` corre en un contenedor que monta el socket (riesgo aceptado para uso
+  con `docker compose up` corre en un contenedor que monta el socket (riesgo aceptado para uso
   local, ver `docs/specs/docker-compose.md` §7). Para producción hace falta Docker sin root o gVisor
   (`--runtime runsc`), porque el kernel es compartido.
 - **Inyección vía latexmk:** latexmk ejecuta cadenas con `/bin/sh`. El patrón estricto de `mainFile` es

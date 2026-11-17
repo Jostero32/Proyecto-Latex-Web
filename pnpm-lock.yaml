@@ -205,6 +205,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
 
   apps/server:
     dependencies:
@@ -229,6 +232,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
       yjs:
         specifier: ^13.6.33
         version: 13.6.33

@@ -1,15 +1,25 @@
 # Credenciales por defecto solo para uso local; sobrescribirlas en .env (ver .env.example).
 # Puertos ligados a 127.0.0.1. Ver docs/specs/docker-compose.md.
 #
-#   docker compose up -d
-#       Solo la infraestructura (postgres, redis, minio). Las apps corren en el host con `pnpm dev`.
-#
-#   docker compose --profile apps up -d --build
-#       Todo: además construye la imagen de TeX Live y levanta server (API + colaboración, :3000),
-#       compiler (worker de la cola `compile`) y web (:5173).
+#   docker compose up -d --build
+#       Toda la app: infraestructura (postgres, redis, minio), la imagen de TeX Live, server
+#       (API + colaboración, :3000), compiler (worker de la cola `compile`) y web (:5173).
 #       ATENCIÓN: el servicio compiler monta el socket de Docker del host, lo que equivale a root
 #       sobre el host. Es para uso local; no para producción.
+#
+#   docker compose up -d postgres redis minio
+#       Solo la infraestructura, para desarrollar con `pnpm dev` en el host.
 name: latexweb
+
+# Endurecimiento común de las apps: sin escalar privilegios, sin capacidades y raíz de solo lectura.
+x-hardening: &hardening
+  init: true
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
 
 services:
   postgres:
@@ -38,6 +48,7 @@ services:
       - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
+    networks: [default, queue-server, queue-compiler]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -64,29 +75,31 @@ services:
       timeout: 5s
       retries: 10
 
-  # --- Apps (perfil `apps`) ---------------------------------------------------------------
+  # --- Apps ------------------------------------------------------------------------------
 
   # Solo construye la imagen de las compilaciones y termina; compiler espera a que termine bien.
   texlive-image:
-    profiles: [apps]
     build: ./apps/compiler/docker
-    image: latexweb-texlive:tl2026-1
+    image: latexweb-texlive:tl2026-2
     entrypoint: ["true"]
     restart: "no"
+    network_mode: none
 
   server:
-    profiles: [apps]
+    <<: *hardening
     build:
       context: .
       target: server
     image: latexweb-server:dev
-    init: true
-    restart: unless-stopped
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
     environment:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 3000
       REDIS_URL: redis://redis:6379
       COMPILE_STORAGE_DIR: /data/compilations
+      # Orígenes web que pueden usar la API y el WebSocket desde un navegador.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://127.0.0.1:5173,http://localhost:5173}
       # Opcionales: si no se definen en .env, se usan los valores por defecto del código.
       COMPILE_TTL_SECONDS:
       COMPILE_MAX_QUEUED:
@@ -94,28 +107,39 @@ services:
       COMPILE_MAX_UPLOAD_FILE_BYTES:
       COMPILE_MAX_UPLOAD_TOTAL_BYTES:
       COMPILE_MAX_UPLOAD_FILES:
+      COMPILE_MAX_CONCURRENT_UPLOADS:
+      COMPILE_MIN_FREE_BYTES:
     volumes:
       - compile-storage:/data/compilations
     ports:
       - "127.0.0.1:${SERVER_PORT:-3000}:3000"
+    networks: [default, queue-server]
     depends_on:
       redis:
         condition: service_healthy
 
   compiler:
-    profiles: [apps]
+    <<: *hardening
     build:
       context: .
       target: compiler
     image: latexweb-compiler:dev
-    init: true
-    restart: unless-stopped
+    # Root dentro del contenedor (por el socket), pero solo con las capacidades que usa: crear y
+    # entregar al uid de las compilaciones las carpetas de salida en el volumen del server.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
     environment:
       REDIS_URL: redis://redis:6379
       COMPILE_STORAGE_DIR: /data/compilations
       # Las compilaciones montan su subcarpeta de este volumen (volume-subpath).
       COMPILE_STORAGE_VOLUME: latexweb-compile-storage
-      COMPILE_IMAGE: latexweb-texlive:tl2026-1
+      COMPILE_IMAGE: latexweb-texlive:tl2026-2
+      # La CLI de docker escribe su configuración en $DOCKER_CONFIG; la raíz es de solo lectura.
+      DOCKER_CONFIG: /tmp/.docker
       COMPILE_TIMEOUT_SECONDS:
       COMPILE_MEMORY:
       COMPILE_CPUS:
@@ -125,9 +149,12 @@ services:
       COMPILE_TTL_SECONDS:
       COMPILE_MAX_PDF_BYTES:
       COMPILE_MAX_LOG_BYTES:
+      COMPILE_MIN_FREE_BYTES:
     volumes:
       - compile-storage:/data/compilations
       - /var/run/docker.sock:/var/run/docker.sock
+    # Solo Redis: el worker no necesita (ni alcanza) postgres, minio ni el server.
+    networks: [queue-compiler]
     depends_on:
       redis:
         condition: service_healthy
@@ -135,18 +162,27 @@ services:
         condition: service_completed_successfully
 
   web:
-    profiles: [apps]
+    <<: *hardening
     build:
       context: .
       target: web
     image: latexweb-web:dev
-    init: true
-    restart: unless-stopped
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+      # `vite preview` compila vite.config.ts aquí al arrancar.
+      - /app/apps/web/node_modules/.vite-temp:rw,nosuid,nodev,noexec,size=16m,uid=1000,gid=1000,mode=0700
     ports:
       - "127.0.0.1:${WEB_PORT:-5173}:5173"
     depends_on:
       server:
         condition: service_healthy
+
+networks:
+  # Redes internas de la cola: redis está en las dos; server y compiler no se ven entre sí.
+  queue-server:
+    internal: true
+  queue-compiler:
+    internal: true
 
 volumes:
   postgres-data:

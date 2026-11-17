@@ -8,8 +8,8 @@ con `pnpm dev`.
 ## 2. Alcance
 **Incluye**
 - `Dockerfile` en la raíz, multi-etapa, con un target por app: `server`, `compiler` y `web`.
-- Servicios nuevos en `docker-compose.yml` bajo el perfil `apps`, más un servicio que construye la imagen
-  `latexweb-texlive`.
+- Servicios nuevos en `docker-compose.yml` (sin perfil: `docker compose up` levanta toda la app), más un
+  servicio que construye la imagen `latexweb-texlive`.
 - Modo **volumen** para la compilación: el worker en un contenedor lanza las compilaciones con el
   socket de Docker del host y monta la subcarpeta del trabajo desde un volumen con nombre
   (`volume-subpath`), en lugar de rutas del host.
@@ -25,11 +25,23 @@ con `pnpm dev`.
 ### Dos formas de correr el sistema
 | Comando | Qué levanta | Compilación |
 |---|---|---|
-| `docker compose up -d` (sin cambios) | postgres, redis y minio | El worker corre en el host con `pnpm dev`; modo **bind** (el actual) |
-| `docker compose --profile apps up -d --build` | todo lo anterior, más texlive-image, server, compiler y web | Modo **volumen** |
+| `docker compose up -d --build` | postgres, redis, minio, texlive-image, server, compiler y web | Modo **volumen** |
+| `docker compose up -d postgres redis minio` + `pnpm dev` | solo la infraestructura; las apps en el host | Modo **bind** |
 
-El perfil `apps` evita que `docker compose up -d` (el comando de CLAUDE.md para la infraestructura)
-choque con `pnpm dev` en el puerto 3000.
+> **Cambio posterior:** la primera versión ponía las apps bajo un perfil `apps`, para que
+> `docker compose up -d` siguiera levantando solo la infraestructura. Se quitó el perfil a pedido del
+> usuario: con `docker compose up` corre toda la app, y para `pnpm dev` se nombran los servicios de
+> infraestructura.
+
+### Endurecimiento de los servicios (hallazgos de revisor-seguridad)
+- `server`, `compiler` y `web`: `no-new-privileges`, `cap_drop: [ALL]`, raíz de solo lectura y tmpfs en
+  `/tmp`. `web` tiene además un tmpfs del uid `node` para `node_modules/.vite-temp`.
+- `compiler` recupera solo `CHOWN`, `DAC_OVERRIDE` y `FOWNER` (crear y entregar `out/` en el volumen del
+  server) y está **solo** en la red interna `queue-compiler` con redis (el server usa otra,
+  `queue-server`): no alcanza a postgres, minio ni al server (verificado).
+- Cada imagen instala solo las dependencias de su app (`pnpm install --prod --filter <app>...`; `tsx`
+  pasó a ser dependencia de server y compiler). pnpm se instala con `corepack install`, que verifica el
+  hash de `packageManager`.
 
 ### Por qué un volumen con subpath
 Las compilaciones son contenedores **hermanos** del worker: el worker se los pide al daemon del host
@@ -82,7 +94,7 @@ Verificado en Docker 29.5.3 (API 1.54) con todos los flags del sandbox:
   dueño `node` (sin eso, el contenedor fallaba con EACCES).
 - **Arranque:** las apps arrancan con `node` + `tsx` directamente (no `pnpm start`), para que las
   señales de apagado lleguen al proceso.
-- **`texlive-image`:** construye `latexweb-texlive:tl2026-1` desde `apps/compiler/docker/` y termina
+- **`texlive-image`:** construye `latexweb-texlive:tl2026-2` desde `apps/compiler/docker/` y termina
   (`entrypoint: ["true"]`). `compiler` espera a que termine bien (`service_completed_successfully`).
 
 ### Compose
@@ -114,18 +126,19 @@ Verificado en Docker 29.5.3 (API 1.54) con todos los flags del sandbox:
 3. **Test de integración del modo volumen:** crea un volumen, lo llena con un contenedor auxiliar,
    compila `articulo-simple` y `malicioso` con `runContainer` y verifica el PDF y las 5 claves BLOQUEADO.
 4. **`Dockerfile` y `.dockerignore`:** construir los tres targets.
-5. **Compose:** servicios, perfil, volumen y healthchecks.
+5. **Compose:** servicios, volumen y healthchecks.
 6. **Verificación:**
-   - `docker compose --profile apps up -d --build`;
+   - `docker compose up -d --build`;
    - `/probar-compilacion` contra `127.0.0.1:3000` (6/6);
    - `malicioso` con `LATEXWEB_CANARY` definida en el servicio `compiler`;
    - `revisor-seguridad` sobre el diff;
    - documentación.
 
 ## 6. Criterios de aceptación
-- [ ] `docker compose --profile apps up -d --build` levanta todo y `/probar-compilacion` da 6/6 en `success`
+- [ ] `docker compose up -d --build` levanta todo y `/probar-compilacion` da 6/6 en `success`
       contra el servidor en contenedor.
-- [ ] `docker compose up -d` sigue levantando solo postgres, redis y minio, y `pnpm dev` funciona como antes.
+- [ ] `docker compose up -d postgres redis minio` levanta solo la infraestructura y `pnpm dev` funciona
+      como antes.
 - [ ] En modo volumen, `malicioso` da las 5 claves BLOQUEADO con `LATEXWEB_CANARY` definida en el contenedor
       del worker.
 - [ ] Los argumentos en modo volumen tienen exactamente dos `--mount` de tipo `volume`, `/in` readonly y

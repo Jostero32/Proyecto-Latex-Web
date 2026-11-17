@@ -7,11 +7,12 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "image:build": "docker build -t latexweb-texlive:tl2026-1 docker"
+    "image:build": "docker build -t latexweb-texlive:tl2026-2 docker"
   },
   "dependencies": {
     "@latexweb/shared": "workspace:*",
     "bullmq": "^6.7.5",
-    "ioredis": "^6.0.0"
+    "ioredis": "^6.0.0",
+    "tsx": "^4.23.15"
   }
 }

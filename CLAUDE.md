@@ -12,10 +12,9 @@ Editor LaTeX web con compilación, vista PDF y colaboración en tiempo real.
 
 ## Comandos
 - Instalar: `pnpm install`
-- Levantar servicios (solo infraestructura): `docker compose up -d`
-- Dev: `pnpm dev` (con la infraestructura levantada)
-- Todo en contenedores, sin Node en el host: `docker compose --profile apps up -d --build`
+- Toda la app en contenedores (infraestructura, server, compiler y web): `docker compose up -d --build`
   (el servicio compiler monta el socket de Docker: solo para uso local)
+- Dev con hot reload: `docker compose up -d postgres redis minio` y después `pnpm dev`
 - Tests: `pnpm test`
 - Tests de integración (Docker real): `pnpm test:integration`
 - Lint y tipos: `pnpm lint && pnpm typecheck`
