@@ -1,11 +1,10 @@
-import { mkdir } from 'node:fs/promises';
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { COMPILE_QUEUE, type CompileJobData, type CompileJobResult, type ServiceName } from '@latexweb/shared';
 import { loadConfig } from './config';
 import { checkDocker, MIN_API_FOR_VOLUME_SUBPATH } from './docker/docker-check';
 import { resolveContainerUser } from './docker/docker-args';
-import { createLocalWorkspace } from './workspace/workspace';
+import { createLocalWorkspace, prepareStorageRoot } from './workspace/workspace';
 import { createCompileProcessor } from './worker/processor';
 
 const service: ServiceName = 'compiler';
@@ -22,7 +21,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  await mkdir(config.storageDir, { recursive: true });
+  await prepareStorageRoot(config.storageDir);
   const containerUser = resolveContainerUser();
   const workspace = createLocalWorkspace({
     root: config.storageDir,

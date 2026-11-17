@@ -1,18 +1,17 @@
-import { mkdir } from 'node:fs/promises';
 import { Redis } from 'ioredis';
 import type { ServiceName } from '@latexweb/shared';
 import { buildApp } from './app';
 import { loadConfig } from './config';
 import { COLLAB_PATH } from './features/collab';
 import { createBullCompileQueue } from './features/compilations';
-import { createLocalCompilationsStorage } from './features/compilations';
+import { createLocalCompilationsStorage, prepareStorageRoot } from './features/compilations';
 
 const service: ServiceName = 'server';
 
 async function main(): Promise<void> {
   const config = loadConfig();
 
-  await mkdir(config.compilations.storageDir, { recursive: true });
+  await prepareStorageRoot(config.compilations.storageDir);
   // Sin cola offline: si Redis no responde, los comandos fallan enseguida y la API devuelve 503
   // en lugar de dejar la petición colgada.
   const redis = new Redis(config.redisUrl, { enableOfflineQueue: false, maxRetriesPerRequest: 1 });

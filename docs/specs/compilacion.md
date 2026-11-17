@@ -117,7 +117,7 @@ run --rm --name latexweb-compile-<id> --label latexweb.compile=<id> --init
   los dos montajes pasan a ser `type=volume` del volumen `latexweb-compile-storage` con
   `volume-subpath=<id>/input` (readonly) y `<id>/out`, derivados solo del id. Los demás flags no cambian.
   Ver `docs/specs/docker-compose.md`.
-- **Usuario:** en Linux es el `uid:gid` del worker. En Windows se usa `1000:1000` (verificado: escribe en
+- **Usuario:** en Linux es el `uid:gid` del worker. En Windows (o con el worker como root) se usa `10001:10001`, un uid sin cuenta en el host (verificado: escribe en
   `/out` con un bind mount de Windows).
 - **Timeout en dos niveles:**
   - Dentro del contenedor, `timeout -k 5 $LATEXWEB_TIMEOUT latexmk …` devuelve 124 y aun así se copia el log.

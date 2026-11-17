@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createLocalWorkspace, WorkspaceError, type LocalWorkspaceOptions, type Workspace } from './workspace';
+import { createLocalWorkspace, prepareStorageRoot, WorkspaceError, type LocalWorkspaceOptions, type Workspace } from './workspace';
 
 const ID = '123e4567-e89b-42d3-a456-426614174000';
 const USER = { uid: 1001, gid: 1002 };
@@ -450,5 +450,45 @@ describe('sweepExpired', () => {
     const later = await make().sweepExpired(MAX_AGE, mtime + MAX_AGE + 1);
     expect(later.removed).toEqual([id]);
     expect(await exists(dir)).toBe(false);
+  });
+});
+
+describe('prepareStorageRoot', () => {
+  let base: string;
+  beforeEach(async () => {
+    base = await fs.mkdtemp(path.join(os.tmpdir(), 'latexweb-root-test-'));
+  });
+  afterEach(async () => {
+    await fs.rm(base, { recursive: true, force: true });
+  });
+
+  it('crea la raíz si no existe', async () => {
+    const root = path.join(base, 'a', 'raiz');
+    await prepareStorageRoot(root);
+    expect((await fs.lstat(root)).isDirectory()).toBe(true);
+  });
+
+  it('acepta una raíz existente propia', async () => {
+    await expect(prepareStorageRoot(base)).resolves.toBeUndefined();
+  });
+
+  it('rechaza un archivo en lugar de un directorio', async () => {
+    const file = path.join(base, 'archivo');
+    await fs.writeFile(file, 'x');
+    await expect(prepareStorageRoot(file)).rejects.toThrow();
+  });
+
+  it('rechaza una raíz que es un enlace (junction en Windows, symlink en POSIX)', async () => {
+    const target = path.join(base, 'destino');
+    const link = path.join(base, 'enlace');
+    await fs.mkdir(target);
+    await fs.symlink(target, link, 'junction');
+    await expect(prepareStorageRoot(link)).rejects.toBeInstanceOf(WorkspaceError);
+  });
+
+  it.skipIf(process.platform === 'win32')('rechaza una raíz de otro usuario o escribible por otros (POSIX)', async () => {
+    await expect(prepareStorageRoot(base, () => 424242)).rejects.toThrow(/otro usuario/);
+    await fs.chmod(base, 0o777);
+    await expect(prepareStorageRoot(base)).rejects.toThrow(/escribible por otros/);
   });
 });

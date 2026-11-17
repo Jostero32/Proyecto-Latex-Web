@@ -3,7 +3,7 @@
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { classifyRun, runContainer } from './runner';
+import { classifyRun, runContainer, runDocker } from './runner';
 
 describe('classifyRun', () => {
   const outcome = (o: string) => ({ kind: 'outcome', outcome: o });
@@ -87,4 +87,16 @@ describe('runContainer (docker falso = node)', () => {
       }),
     ).rejects.toMatchObject({ code: 'ENOENT' });
   }, 20_000);
+});
+
+describe('runDocker (subcomandos auxiliares)', () => {
+  it('no se queda colgado si el comando no termina: lo mata al vencer el timeout', async () => {
+    const started = Date.now();
+    await runDocker(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], 300);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 20_000);
+
+  it('con un ejecutable inexistente resuelve sin lanzar', async () => {
+    await expect(runDocker(join(tmpdir(), 'no-existe-docker-bin'), ['rm', '-f', 'x'])).resolves.toBeUndefined();
+  });
 });

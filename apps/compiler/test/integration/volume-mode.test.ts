@@ -43,7 +43,7 @@ describe.skipIf(!dockerReady)('modo volumen con Docker real', () => {
     const id = randomUUID();
     // Lo que harían server (input/) y prepareInputs del worker en contenedor (out/ del uid 1000).
     const prep = inVolume(
-      `mkdir -p /data/${id}/input /data/${id}/out && cp -R /src/. /data/${id}/input/ && chown 1000:1000 /data/${id}/out`,
+      `mkdir -p /data/${id}/input /data/${id}/out && cp -R /src/. /data/${id}/input/ && chown 10001:10001 /data/${id}/out`,
       ['--mount', `type=bind,source=${FIXTURES}${fixture},target=/src,readonly`],
     );
     expect(prep.status, prep.stderr).toBe(0);
@@ -64,7 +64,7 @@ describe.skipIf(!dockerReady)('modo volumen con Docker real', () => {
         memory: '1g',
         pidsLimit: 128,
         tmpfsSize: '256m',
-        user: { uid: 1000, gid: 1000 },
+        user: { uid: 10001, gid: 10001 },
         storageVolume: volume,
       }),
     });
@@ -91,7 +91,7 @@ describe.skipIf(!dockerReady)('modo volumen con Docker real', () => {
     const id = randomUUID();
     expect(inVolume(`mkdir -p /data/${id}/input`).status).toBe(0);
     const write = docker([
-      'run', '--rm', '--user', '1000:1000',
+      'run', '--rm', '--user', '10001:10001',
       '--mount', `type=volume,source=${volume},target=/in,volume-subpath=${id}/input,readonly`,
       '--entrypoint', 'sh', IMAGE, '-c', 'touch /in/x',
     ]);

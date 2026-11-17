@@ -258,21 +258,21 @@ describe('tmpfs y usuario del contenedor', () => {
 });
 
 describe('resolveContainerUser', () => {
-  it('sin getuid ni getgid (Windows) devuelve 1000:1000', () => {
-    expect(resolveContainerUser(undefined, undefined)).toEqual({ uid: 1000, gid: 1000 });
+  it('sin getuid ni getgid (Windows) devuelve 10001:10001', () => {
+    expect(resolveContainerUser(undefined, undefined)).toEqual({ uid: 10001, gid: 10001 });
   });
 
-  it('sin solo uno de los dos devuelve 1000:1000', () => {
-    expect(resolveContainerUser(undefined, () => 1002)).toEqual({ uid: 1000, gid: 1000 });
-    expect(resolveContainerUser(() => 1001, undefined)).toEqual({ uid: 1000, gid: 1000 });
+  it('sin solo uno de los dos devuelve 10001:10001', () => {
+    expect(resolveContainerUser(undefined, () => 1002)).toEqual({ uid: 10001, gid: 10001 });
+    expect(resolveContainerUser(() => 1001, undefined)).toEqual({ uid: 10001, gid: 10001 });
   });
 
   it.each([
     ['uid 0', 0, 1002],
     ['gid 0', 1001, 0],
     ['uid y gid 0', 0, 0],
-  ])('con %s (root) devuelve 1000:1000', (_label, uid, gid) => {
-    expect(resolveContainerUser(() => uid, () => gid)).toEqual({ uid: 1000, gid: 1000 });
+  ])('con %s (root) devuelve 10001:10001', (_label, uid, gid) => {
+    expect(resolveContainerUser(() => uid, () => gid)).toEqual({ uid: 10001, gid: 10001 });
   });
 
   it('con 1001/1002 devuelve esos valores', () => {

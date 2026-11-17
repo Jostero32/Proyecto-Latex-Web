@@ -74,7 +74,7 @@ Verificado en Docker 29.5.3 (API 1.54) con todos los flags del sandbox:
     `runContainer` y `checkDocker` funcionen sin cambiar su código; no se agrega ninguna dependencia de npm.
   - **Socket:** monta `/var/run/docker.sock`.
   - **Usuario root dentro de su contenedor**, por el socket. Con el worker como root, el código actual ya
-    lanza las compilaciones como `1000:1000` y hace `chown` de `out/` (`resolveContainerUser`).
+    lanza las compilaciones como `10001:10001` y hace `chown` de `out/` (`resolveContainerUser`).
   - En Linux, si se corre como no root, se usaría `group_add` con el GID del grupo `docker`; queda
     documentado, no se implementa.
 - **`web`:** `vite build` y `vite preview --host 0.0.0.0 --port 5173`, publicado en `127.0.0.1:5173`.

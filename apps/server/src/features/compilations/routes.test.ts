@@ -563,3 +563,45 @@ describe('GET artefactos: seguridad', () => {
     expect(res.body).not.toContain('contenido-secreto');
   });
 });
+
+describe('POST /compilations: fallo a mitad de saveInputs', () => {
+  async function startWithSaveError(error: Error): Promise<string[]> {
+    await app.close();
+    const real = createLocalCompilationsStorage(root);
+    const removed: string[] = [];
+    app = await buildApp({
+      compilations: {
+        queue,
+        config: baseConfig(root),
+        storage: {
+          ...real,
+          saveInputs: async () => {
+            throw error;
+          },
+          remove: async (id) => {
+            removed.push(id);
+            await real.remove(id);
+          },
+        },
+      },
+    });
+    return removed;
+  }
+
+  it('EEXIST (colisión que solo detecta el disco) → 400 duplicate_path y se borra lo escrito', async () => {
+    const removed = await startWithSaveError(Object.assign(new Error('EEXIST: file already exists'), { code: 'EEXIST' }));
+    const res = await upload([{ name: 'main.tex' }]);
+    expect(res.statusCode).toBe(400);
+    expectErrorShape(res.json(), 'duplicate_path');
+    expect(removed).toHaveLength(1);
+    expect(queue.added).toEqual([]);
+  });
+
+  it('cualquier otro error → 500 y también se borra lo escrito', async () => {
+    const removed = await startWithSaveError(Object.assign(new Error('ENOSPC: no space left'), { code: 'ENOSPC' }));
+    const res = await upload([{ name: 'main.tex' }]);
+    expect(res.statusCode).toBe(500);
+    expectErrorShape(res.json(), 'internal_error');
+    expect(removed).toHaveLength(1);
+  });
+});

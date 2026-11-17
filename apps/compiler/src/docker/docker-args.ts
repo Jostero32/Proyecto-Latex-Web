@@ -19,7 +19,9 @@ export const ENGINE_FLAGS = {
 export const CONTAINER_ENV_NAMES = ['openout_any', 'shell_escape', 'HOME', 'LATEXWEB_TIMEOUT'] as const;
 
 /** Usuario del contenedor cuando no se puede usar el del worker (Windows, macOS sin getuid, o root). */
-export const FALLBACK_CONTAINER_USER: Readonly<ContainerUser> = Object.freeze({ uid: 1000, gid: 1000 });
+// uid sin cuenta en el host: 1000 suele ser el primer usuario humano de un Linux, y un escape o un
+// archivo que quede tendría su identidad.
+export const FALLBACK_CONTAINER_USER: Readonly<ContainerUser> = Object.freeze({ uid: 10001, gid: 10001 });
 
 export interface ContainerUser {
   uid: number;
@@ -61,7 +63,7 @@ export function containerName(compilationId: string): string {
 /**
  * Usuario con el que corre el contenedor. En Linux, el uid/gid del worker, para que los
  * artefactos de /out le pertenezcan. Nunca root: si el worker corre como root (o la plataforma
- * no tiene getuid, como Windows) se usa 1000:1000 y el directorio de salida debe ser escribible
+ * no tiene getuid, como Windows) se usa 10001:10001 y el directorio de salida debe ser escribible
  * por ese uid.
  */
 export function resolveContainerUser(

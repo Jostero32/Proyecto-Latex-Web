@@ -66,7 +66,20 @@ export async function compilationsRoutes(app: FastifyInstance, deps: Compilation
     }
 
     const id = randomUUID();
-    await storage.saveInputs(id, upload.files);
+    try {
+      await storage.saveInputs(id, upload.files);
+    } catch (error) {
+      // Nunca dejar un proyecto a medio escribir (si no, se podrían acumular datos sin pasar por la cola).
+      await storage.remove(id).catch((removeError: unknown) =>
+        request.log.error({ err: removeError, compilationId: id }, 'no se pudieron borrar los archivos'),
+      );
+      // Colisión que el sistema de archivos detecta y la validación no (p. ej. alias 8.3 o
+      // mayúsculas en NTFS): es un error del cliente.
+      if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
+        return fail(reply, 400, 'duplicate_path', 'Dos archivos del proyecto apuntan al mismo nombre en disco');
+      }
+      throw error;
+    }
     try {
       await queue.add({ compilationId: id, mainFile: upload.mainFile, engine: upload.engine });
     } catch (error) {

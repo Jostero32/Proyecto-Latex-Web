@@ -53,7 +53,10 @@ export async function runContainer(options: RunContainerOptions): Promise<RunCon
   let killedByWorker = false;
   const killer = setTimeout(() => {
     killedByWorker = true;
-    void runDocker(docker, ['kill', options.containerName]).finally(() => child.kill());
+    // En paralelo: matar la CLI no detiene el contenedor, y esperar a `docker kill` dejaría la
+    // ranura ocupada si el daemon no responde.
+    void runDocker(docker, ['kill', options.containerName]);
+    child.kill();
   }, killAfterMs);
 
   try {
@@ -105,11 +108,31 @@ export function classifyRun(run: Pick<RunContainerResult, 'exitCode' | 'killedBy
   return { kind: 'outcome', outcome: 'error' };
 }
 
-/** Ejecuta un subcomando de docker auxiliar e ignora su resultado (rm/kill son idempotentes). */
-function runDocker(docker: string, args: string[]): Promise<void> {
+/** Tope para los subcomandos auxiliares: si el daemon se cuelga, no bloquean la ranura del worker. */
+export const AUX_COMMAND_TIMEOUT_MS = 30_000;
+
+/**
+ * Ejecuta un subcomando de docker auxiliar e ignora su resultado (rm/kill son idempotentes). Si no
+ * termina en `timeoutMs`, mata la CLI y sigue.
+ */
+export function runDocker(docker: string, args: string[], timeoutMs: number = AUX_COMMAND_TIMEOUT_MS): Promise<void> {
   return new Promise((resolve) => {
-    const child = spawn(docker, args, { stdio: 'ignore', windowsHide: true });
-    child.once('error', () => resolve());
-    child.once('close', () => resolve());
+    let child;
+    try {
+      child = spawn(docker, args, { stdio: 'ignore', windowsHide: true });
+    } catch {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve();
+    }, timeoutMs);
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    child.once('error', done);
+    child.once('close', done);
   });
 }

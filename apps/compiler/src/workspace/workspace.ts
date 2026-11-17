@@ -205,6 +205,31 @@ async function publishLogTail(source: string, target: string, maxBytes: number):
 }
 
 /**
+ * Crea la raíz de almacenamiento si no existe (0700) y rechaza una raíz insegura. En Linux la raíz
+ * por defecto está en /tmp, compartido entre usuarios: otro usuario podría crearla antes, o dejar
+ * un symlink, y leer o redirigir todas las compilaciones. Dueño y modo solo se comprueban en POSIX.
+ */
+export async function prepareStorageRoot(
+  root: string,
+  getuid: (() => number) | undefined = process.getuid,
+): Promise<void> {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const stats = await lstat(root);
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw new WorkspaceError(`la raíz de almacenamiento no es un directorio real (¿symlink?): ${root}`);
+  }
+  if (process.platform === 'win32' || getuid === undefined) return;
+  const uid = getuid();
+  // root puede operar sobre la raíz de otro usuario (docker compose: el volumen es del server).
+  if (uid !== 0 && stats.uid !== uid) {
+    throw new WorkspaceError(`la raíz de almacenamiento pertenece a otro usuario (uid ${stats.uid}): ${root}`);
+  }
+  if ((stats.mode & 0o022) !== 0) {
+    throw new WorkspaceError(`la raíz de almacenamiento es escribible por otros usuarios: ${root}`);
+  }
+}
+
+/**
  * chown de un directorio sin seguir symlinks: se abre con O_NOFOLLOW|O_DIRECTORY y se cambia el
  * dueño sobre el descriptor (fchown). Con chown(path), si alguien reemplaza el directorio por un
  * symlink entre el mkdir y el chown, un worker root cambiaría el dueño del destino.
