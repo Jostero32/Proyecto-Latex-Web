@@ -64,7 +64,7 @@ export function registerRequestGuard(app: FastifyInstance, options: RequestGuard
     if (!isAllowedHost(request.headers.host, options)) {
       return sendError(reply, 403, 'forbidden_host', 'Host no permitido');
     }
-    if (!SAFE_METHODS.has(request.method) && !isAllowedOrigin(request.headers.origin, options)) {
+    if (!SAFE_METHODS.has(request.method) && !isAllowedOrigin(request.headers.origin, options, request.headers.host)) {
       return sendError(reply, 403, 'forbidden_origin', 'Origen no permitido');
     }
   });
@@ -90,10 +90,16 @@ export function isAllowedHost(hostHeader: string | undefined, options: RequestGu
   return name !== null && options.allowedHosts.map((h) => h.toLowerCase()).includes(name);
 }
 
-/** Sin Origin → permitido (no es un navegador). `null` (sandbox, file://) → rechazado. */
-export function isAllowedOrigin(origin: string | undefined, options: RequestGuardOptions): boolean {
+/**
+ * Sin Origin → permitido (no es un navegador). `null` (sandbox, file://) → rechazado. El mismo origen
+ * que el server (`http(s)://<Host>`, p. ej. Swagger UI en /api/docs) también se permite: otro sitio no
+ * puede mandar ese Origin, y el Host ya pasó por su propia guarda.
+ */
+export function isAllowedOrigin(origin: string | undefined, options: RequestGuardOptions, host?: string): boolean {
   if (origin === undefined) return true;
   const normalized = origin.trim().replace(/\/+$/, '').toLowerCase();
+  const self = host?.trim().toLowerCase();
+  if (self && [`http://${self}`, `https://${self}`].includes(normalized)) return true;
   return options.allowedOrigins.some((allowed) => allowed.trim().replace(/\/+$/, '').toLowerCase() === normalized);
 }
 

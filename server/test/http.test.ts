@@ -38,6 +38,12 @@ describe('guardas de Host y Origin', () => {
     expect(get.statusCode).toBe(200);
   });
 
+  it('acepta el mismo origen que el server (Swagger UI en /api/docs), pero no otro puerto', async () => {
+    const post = (origin: string) => app.inject({ method: 'POST', url: '/echo', headers: { host: '127.0.0.1:3000', origin } });
+    expect((await post('http://127.0.0.1:3000')).statusCode).toBe(200);
+    expect((await post('http://127.0.0.1:4000')).statusCode).toBe(403);
+  });
+
   it('usa la configuración propia en lugar de los valores por defecto', async () => {
     const custom = await buildApp({ security: { allowedOrigins: ['https://app.ejemplo.com'], allowedHosts: ['app.ejemplo.com'] } });
     try {

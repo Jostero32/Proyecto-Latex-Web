@@ -19,7 +19,6 @@ momento (CLAUDE.md, "Forma de trabajo"). Ordenado por prioridad dentro de cada s
 | baja | api | Swagger UI está encendido por defecto (`API_DOCS`): en despliegue, apagarlo o dejarlo detrás de auth (spec `cierre`). |
 | baja | web | Los mensajes de `diagnostics` y los nombres de archivos vienen del usuario: la web los muestra como texto, nunca como HTML. |
 | baja | compilación | El worker usa las credenciales raíz de MinIO: un usuario propio con permiso solo sobre `compilations/`. |
-| baja | api | Swagger UI "Try it out" con POST desde `localhost:3000` responde 403: ese origen no está en `ALLOWED_ORIGINS` (a propósito). Con el proxy de Vite (frontend) la UI queda en el mismo origen que la web. |
 | baja | colaboración | **Cerrar sesión no corta los WebSockets abiertos** de esa sesión: siguen hasta que se cierran solos. Cerrarlos en logout (por usuario, como al quitar permisos). |
 | baja | colaboración | El tope de documento estima el tamaño sumando todos los mensajes, también los de presencia (awareness): cerca del tope recalcula el tamaño exacto más seguido de lo necesario. |
 | baja | proyectos | **Topes con carreras:** dos subidas simultáneas al mismo proyecto pueden pasar juntas el tope de bytes o de archivos (se calcula antes de escribir, sin bloqueo). |
