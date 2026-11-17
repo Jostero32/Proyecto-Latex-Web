@@ -18,6 +18,7 @@ Editor LaTeX web con compilación, vista PDF y colaboración en tiempo real.
 - Tests: `pnpm test`
 - Tests de integración (Docker real): `pnpm test:integration`
 - Lint y tipos: `pnpm lint && pnpm typecheck`
+- Migraciones (con la base levantada): `pnpm --filter @latexweb/server db:migrate`; en compose las aplica el servicio `migrate`
 
 ## Estructura de carpetas
 Todo código nuevo sigue estas reglas.

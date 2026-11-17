@@ -15,3 +15,4 @@ fixtures
 apps/compiler/docker
 apps/*/test
 **/*.test.ts
+**/src/generated

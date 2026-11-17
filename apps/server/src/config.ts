@@ -31,6 +31,9 @@ export interface ServerConfig {
   host: string;
   port: number;
   redisUrl: string;
+  databaseUrl: string;
+  /** Cookie de sesión con el atributo Secure (obligatorio en producción, con HTTPS). */
+  cookieSecure: boolean;
   /** Timeout para recibir una petición completa (contra subidas lentas tipo slowloris). */
   requestTimeoutMs: number;
   security: RequestGuardOptions;
@@ -46,6 +49,8 @@ export function loadConfig(env: Env = process.env): ServerConfig {
     host: env.SERVER_HOST === undefined || env.SERVER_HOST === '' ? '127.0.0.1' : env.SERVER_HOST,
     port: envPositiveInteger(env, 'SERVER_PORT', 3000),
     redisUrl: env.REDIS_URL ?? 'redis://127.0.0.1:6379',
+    databaseUrl: env.DATABASE_URL ?? 'postgresql://latexweb:latexweb@127.0.0.1:5432/latexweb',
+    cookieSecure: env.COOKIE_SECURE === 'true',
     requestTimeoutMs: envPositiveInteger(env, 'SERVER_REQUEST_TIMEOUT_MS', 120_000),
     security: {
       allowedOrigins: list(env.ALLOWED_ORIGINS) ?? DEFAULT_ALLOWED_ORIGINS,

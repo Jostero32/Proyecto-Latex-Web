@@ -32,11 +32,28 @@ COPY packages/shared packages/shared
 # server puede crear las carpetas de cada compilación.
 RUN mkdir -p /data/compilations && chown node:node /data/compilations
 
+# --- Prisma: cliente generado y migraciones ---
+# Con las dependencias de desarrollo (la CLI de prisma). El postinstall de apps/server corre
+# `prisma generate` y deja el cliente en apps/server/src/generated.
+FROM base AS server-build
+COPY apps/server/prisma apps/server/prisma
+COPY apps/server/prisma.config.ts apps/server/
+RUN pnpm install --frozen-lockfile --filter "@latexweb/server..."
+
+# Servicio de una sola ejecución: aplica las migraciones pendientes y termina.
+FROM server-build AS migrate
+WORKDIR /app/apps/server
+USER node
+ENV HOME=/tmp
+CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
+
 # --- API REST + colaboración ---
 FROM base AS server
-RUN pnpm install --frozen-lockfile --prod --filter "@latexweb/server..."
+# Solo producción y sin scripts: el cliente de Prisma viene ya generado de server-build.
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts --filter "@latexweb/server..."
 COPY apps/server/tsconfig.json apps/server/
 COPY apps/server/src apps/server/src
+COPY --from=server-build /app/apps/server/src/generated apps/server/src/generated
 WORKDIR /app/apps/server
 USER node
 # SERVER_HOST=0.0.0.0 lo define docker-compose.yml y no la imagen: un `docker run -p` suelto no debe

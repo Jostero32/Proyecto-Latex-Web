@@ -85,6 +85,22 @@ services:
     restart: "no"
     network_mode: none
 
+  # Aplica las migraciones de Prisma y termina; server espera a que termine bien.
+  migrate:
+    <<: *hardening
+    restart: "no"
+    build:
+      context: .
+      target: migrate
+    image: latexweb-migrate:dev
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-latexweb}:${POSTGRES_PASSWORD:-latexweb}@postgres:5432/${POSTGRES_DB:-latexweb}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   server:
     <<: *hardening
     build:
@@ -97,6 +113,9 @@ services:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 3000
       REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://${POSTGRES_USER:-latexweb}:${POSTGRES_PASSWORD:-latexweb}@postgres:5432/${POSTGRES_DB:-latexweb}
+      # Solo http://localhost: en producción (HTTPS) tiene que ser true.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       COMPILE_STORAGE_DIR: /data/compilations
       # Orígenes web que pueden usar la API y el WebSocket desde un navegador.
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://127.0.0.1:5173,http://localhost:5173}
@@ -117,6 +136,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   compiler:
     <<: *hardening
