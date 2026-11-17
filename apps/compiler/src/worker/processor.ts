@@ -24,8 +24,14 @@ export interface ProcessorDeps {
   memory: string;
   pidsLimit: number;
   tmpfsSize: string;
+  /** Tope por archivo de la compilación (--ulimit fsize). */
+  maxFileBytes: number;
   /** Modo volumen (docker compose): volumen con nombre que contiene la raíz de almacenamiento. */
   storageVolume?: string | undefined;
+  /** Si hay menos espacio libre, el job falla sin compilar. Sin esto no se comprueba. */
+  minFreeBytes?: number | undefined;
+  /** Bytes libres en la raíz de almacenamiento (por defecto no se consulta). */
+  freeBytes?: () => Promise<number>;
   /** Inyectable para tests. */
   runContainer?: (options: RunContainerOptions) => Promise<RunContainerResult>;
   /** Registro de fallos de infraestructura (por defecto console.error). */
@@ -58,6 +64,15 @@ export function createCompileProcessor(deps: ProcessorDeps): (job: CompileJob) =
     }
     const { compilationId: id, engine, mainFile } = data;
 
+    // Piso de espacio libre: no compilar (y no publicar hasta ~55 MB más) con el disco casi lleno.
+    if (deps.minFreeBytes !== undefined && deps.freeBytes !== undefined) {
+      const free = await deps.freeBytes();
+      if (free < deps.minFreeBytes) {
+        logError(`[compiler] ${id}: espacio libre insuficiente (${free} < ${deps.minFreeBytes} bytes)`);
+        throw new InfrastructureError('espacio libre insuficiente en el almacenamiento');
+      }
+    }
+
     const paths = await deps.workspace.prepareInputs(id);
     try {
       const runResult = await run({
@@ -74,6 +89,7 @@ export function createCompileProcessor(deps: ProcessorDeps): (job: CompileJob) =
           memory: deps.memory,
           pidsLimit: deps.pidsLimit,
           tmpfsSize: deps.tmpfsSize,
+          maxFileBytes: deps.maxFileBytes,
           user: deps.containerUser,
           storageVolume: deps.storageVolume,
         }),

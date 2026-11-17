@@ -11,7 +11,7 @@ describe('valores por defecto', () => {
     expect(loadConfig({})).toMatchObject({
       redisUrl: 'redis://127.0.0.1:6379',
       storageDir: join(tmpdir(), 'latexweb-compilations'),
-      image: 'latexweb-texlive:tl2026-1',
+      image: 'latexweb-texlive:tl2026-2',
       timeoutSeconds: 60,
       cpus: 1,
       memory: '1g',

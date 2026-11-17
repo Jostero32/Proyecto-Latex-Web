@@ -44,6 +44,11 @@ export interface DockerRunOptions {
   pidsLimit: number;
   /** Tamaño de los tmpfs /tmp y /work, p. ej. `256m`. */
   tmpfsSize: string;
+  /**
+   * Tamaño máximo de cualquier archivo que escriba la compilación (--ulimit fsize, en bytes).
+   * Acota lo que pueda escribirse en /out aunque una herramienta ignore openout_any.
+   */
+  maxFileBytes: number;
   user: Readonly<ContainerUser>;
   /**
    * Modo volumen (worker dentro de docker compose, ver docs/specs/docker-compose.md): si está
@@ -89,6 +94,7 @@ export function buildDockerRunArgs(options: DockerRunOptions): string[] {
   if (options.storageVolume !== undefined) assertVolumeName(options.storageVolume);
   assertPositiveInteger(options.timeoutSeconds, 'timeoutSeconds');
   assertPositiveInteger(options.pidsLimit, 'pidsLimit');
+  assertPositiveInteger(options.maxFileBytes, 'maxFileBytes');
   assertCpus(options.cpus);
   assertSize(options.memory, 'memory');
   assertSize(options.tmpfsSize, 'tmpfsSize');
@@ -113,6 +119,7 @@ export function buildDockerRunArgs(options: DockerRunOptions): string[] {
     '--memory', options.memory,
     '--memory-swap', options.memory,
     '--pids-limit', String(options.pidsLimit),
+    '--ulimit', `fsize=${options.maxFileBytes}`,
     '--read-only',
     // noexec explícito (Docker ya lo pone por defecto, pero no dependemos de eso). biber no
     // necesita ejecutar desde /tmp: está descomprimido en la imagen.

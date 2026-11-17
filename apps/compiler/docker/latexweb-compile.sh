@@ -74,11 +74,19 @@ if [ "$engine" = -pdflua ]; then
   cp "$(kpsewhich -var-value TEXMFSYSVAR)/$names_dir"/* "$(kpsewhich -var-value TEXMFVAR)/$names_dir/"
 fi
 
+# /out (montaje del host o del volumen) sin escritura mientras compila: openout_any=p solo frena a
+# TeX, no a Lua (io.open de lualatex) ni a biber. Quitarle el permiso al propio dueño impide crear
+# archivos ahí; ninguna herramienta de la compilación puede devolverlo (no hay chmod en Lua, sin
+# shell-escape no se ejecutan comandos, y el contenedor no tiene capacidades). En un bind mount de
+# Docker Desktop en Windows chmod puede no tener efecto: ahí el límite es --ulimit fsize.
+chmod 0500 /out 2>/dev/null || echo "latexweb-compile: aviso: no se pudo quitar la escritura de /out" >&2
+
 status=0
 timeout -k 5 "$timeout_s" \
   latexmk -norc -no-shell-escape -interaction=nonstopmode -file-line-error -jobname=output \
   "$engine" "$main" || status=$?
 
+chmod 0700 /out 2>/dev/null || true
 # Se publican solo archivos regulares (nunca symlinks) aunque la compilación haya fallado,
 # para que el usuario pueda leer el log.
 for artifact in output.pdf output.log; do

@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildDockerRunArgs, containerName } from '../../src/docker/docker-args';
 import { classifyRun, runContainer } from '../../src/docker/runner';
 
-const IMAGE = process.env.COMPILE_IMAGE ?? 'latexweb-texlive:tl2026-1';
+const IMAGE = process.env.COMPILE_IMAGE ?? 'latexweb-texlive:tl2026-2';
 const FIXTURES = fileURLToPath(new URL('../../../../fixtures/latex/', import.meta.url));
 const CANARY = 'LATEXWEB_CANARY';
 
@@ -64,6 +64,7 @@ describe.skipIf(!dockerReady)('modo volumen con Docker real', () => {
         memory: '1g',
         pidsLimit: 128,
         tmpfsSize: '256m',
+        maxFileBytes: 52428801,
         user: { uid: 10001, gid: 10001 },
         storageVolume: volume,
       }),
@@ -85,6 +86,92 @@ describe.skipIf(!dockerReady)('modo volumen con Docker real', () => {
       expect(log).toContain(`LATEXWEB-SANDBOX: ${key}=BLOQUEADO`);
     }
     expect(log).not.toContain('=VULNERABLE');
+  }, 180_000);
+
+  // biber no consulta kpathsea: con un biber.conf del proyecto (output_directory=/out) escribía
+  // directamente en /out, saltándose openout_any (verificado con la imagen tl2026-1). El script de
+  // entrada quita el permiso de escritura de /out mientras compila.
+  it('biber no puede escribir en /out aunque el proyecto traiga un biber.conf', async () => {
+    const id = randomUUID();
+    const conf = '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n  <output_directory>/out</output_directory>\n</config>\n';
+    const prep = docker([
+      'run', '--rm', '-v', `${volume}:/data`, '--env', `CONF=${conf}`,
+      '--mount', `type=bind,source=${FIXTURES}con-bibliografia,target=/src,readonly`,
+      '--entrypoint', 'sh', IMAGE, '-c',
+      `mkdir -p /data/${id}/input /data/${id}/out && cp -R /src/. /data/${id}/input/ && printf '%s' "$CONF" > /data/${id}/input/biber.conf && chown 10001:10001 /data/${id}/out`,
+    ]);
+    expect(prep.status, prep.stderr).toBe(0);
+
+    await runContainer({
+      containerName: containerName(id),
+      timeoutSeconds: 60,
+      args: buildDockerRunArgs({
+        compilationId: id,
+        image: IMAGE,
+        engine: 'pdflatex',
+        mainFile: 'main.tex',
+        inputDir: `/data/compilations/${id}/input`,
+        outputDir: `/data/compilations/${id}/out`,
+        timeoutSeconds: 60,
+        cpus: 1,
+        memory: '1g',
+        pidsLimit: 128,
+        tmpfsSize: '256m',
+        maxFileBytes: 52428801,
+        user: { uid: 10001, gid: 10001 },
+        storageVolume: volume,
+      }),
+    });
+    const files = inVolume(`ls /data/${id}/out`).stdout.trim().split('\n').sort();
+    // Solo los artefactos que copia el script al terminar; nada escrito por biber durante la compilación.
+    expect(files.every((f) => f === 'output.pdf' || f === 'output.log')).toBe(true);
+    expect(files).toContain('output.log');
+  }, 180_000);
+
+  // LuaTeX aplica openout_any también a io.open (verificado: pasa incluso sin el chmod de /out).
+  // Regresión: que siga sin poder escribir en /out.
+  it('lualatex no puede escribir en /out con io.open', async () => {
+    const id = randomUUID();
+    const doc = String.raw`\documentclass{article}
+\begin{document}
+\directlua{
+  local f = io.open('/out/pwned-lua.txt', 'w')
+  if f then f:write('PWNED') f:close() texio.write_nl('LATEXWEB-LUA: VULNERABLE')
+  else texio.write_nl('LATEXWEB-LUA: BLOQUEADO') end
+}
+Hola.
+\end{document}
+`;
+    const prep = docker([
+      'run', '--rm', '-v', `${volume}:/data`, '--env', `DOC=${doc}`, '--entrypoint', 'sh', IMAGE, '-c',
+      `mkdir -p /data/${id}/input /data/${id}/out && printf '%s' "$DOC" > /data/${id}/input/main.tex && chown 10001:10001 /data/${id}/out`,
+    ]);
+    expect(prep.status, prep.stderr).toBe(0);
+
+    await runContainer({
+      containerName: containerName(id),
+      timeoutSeconds: 60,
+      args: buildDockerRunArgs({
+        compilationId: id,
+        image: IMAGE,
+        engine: 'lualatex',
+        mainFile: 'main.tex',
+        inputDir: `/data/compilations/${id}/input`,
+        outputDir: `/data/compilations/${id}/out`,
+        timeoutSeconds: 60,
+        cpus: 1,
+        memory: '1g',
+        pidsLimit: 128,
+        tmpfsSize: '256m',
+        maxFileBytes: 52428801,
+        user: { uid: 10001, gid: 10001 },
+        storageVolume: volume,
+      }),
+    });
+    const out = inVolume(`ls /data/${id}/out; grep 'LATEXWEB-LUA' /data/${id}/out/output.log`);
+    expect(out.stdout).toContain('LATEXWEB-LUA: BLOQUEADO');
+    expect(out.stdout).not.toContain('pwned-lua.txt');
+    expect(out.stdout).toContain('output.pdf');
   }, 180_000);
 
   it('/in es de solo lectura dentro del contenedor de compilación', () => {

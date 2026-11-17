@@ -33,6 +33,8 @@ export interface CompilerConfig {
   sweepIntervalMs: number;
   maxPdfBytes: number;
   maxLogBytes: number;
+  /** COMPILE_MIN_FREE_BYTES: con menos espacio libre en la raíz, los jobs fallan sin compilar. */
+  minFreeBytes: number;
 }
 
 const MB = 1024 * 1024;
@@ -42,7 +44,7 @@ export function loadConfig(env: Env = process.env): CompilerConfig {
     redisUrl: env.REDIS_URL ?? 'redis://127.0.0.1:6379',
     storageDir: env.COMPILE_STORAGE_DIR ?? join(tmpdir(), DEFAULT_STORAGE_DIRNAME),
     storageVolume: env.COMPILE_STORAGE_VOLUME === '' ? undefined : env.COMPILE_STORAGE_VOLUME,
-    image: env.COMPILE_IMAGE ?? 'latexweb-texlive:tl2026-1',
+    image: env.COMPILE_IMAGE ?? 'latexweb-texlive:tl2026-2',
     timeoutSeconds: envPositiveInteger(env, 'COMPILE_TIMEOUT_SECONDS', 60),
     cpus: envPositiveNumber(env, 'COMPILE_CPUS', 1),
     memory: envSize(env, 'COMPILE_MEMORY', '1g'),
@@ -53,5 +55,6 @@ export function loadConfig(env: Env = process.env): CompilerConfig {
     sweepIntervalMs: 10 * 60 * 1000,
     maxPdfBytes: envPositiveInteger(env, 'COMPILE_MAX_PDF_BYTES', 50 * MB),
     maxLogBytes: envPositiveInteger(env, 'COMPILE_MAX_LOG_BYTES', 5 * MB),
+    minFreeBytes: envPositiveInteger(env, 'COMPILE_MIN_FREE_BYTES', 1024 * MB),
   };
 }

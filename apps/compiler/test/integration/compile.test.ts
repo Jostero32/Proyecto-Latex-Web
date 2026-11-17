@@ -16,7 +16,7 @@ import { buildDockerRunArgs, containerName, resolveContainerUser } from '../../s
 import { classifyRun, runContainer } from '../../src/docker/runner';
 import { createLocalWorkspace, type Workspace } from '../../src/workspace/workspace';
 
-const IMAGE = process.env.COMPILE_IMAGE ?? 'latexweb-texlive:tl2026-1';
+const IMAGE = process.env.COMPILE_IMAGE ?? 'latexweb-texlive:tl2026-2';
 const FIXTURES = fileURLToPath(new URL('../../../../fixtures/latex/', import.meta.url));
 const CANARY = 'LATEXWEB_CANARY';
 const TEST_TIMEOUT_MS = 180_000;
@@ -94,6 +94,7 @@ describe.skipIf(!dockerReady)('compilación con Docker real', () => {
         memory: '1g',
         pidsLimit: 128,
         tmpfsSize: '256m',
+        maxFileBytes: 52428801,
         user,
       }),
     });

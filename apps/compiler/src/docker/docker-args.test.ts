@@ -20,7 +20,7 @@ const USER = { uid: 1001, gid: 1002 };
 function makeOptions(overrides: Partial<DockerRunOptions> = {}): DockerRunOptions {
   return {
     compilationId: ID,
-    image: 'latexweb-texlive:tl2026-1',
+    image: 'latexweb-texlive:tl2026-2',
     engine: 'pdflatex',
     mainFile: 'main.tex',
     inputDir: INPUT_DIR,
@@ -30,6 +30,7 @@ function makeOptions(overrides: Partial<DockerRunOptions> = {}): DockerRunOption
     memory: '1g',
     pidsLimit: 256,
     tmpfsSize: '256m',
+    maxFileBytes: 52428801,
     user: USER,
     ...overrides,
   };
@@ -190,7 +191,7 @@ describe('modo volumen (storageVolume)', () => {
 
   it('el orden final no cambia: imagen, opciones, motor y mainFile al final', () => {
     const args = build({ storageVolume: VOLUME, engine: 'xelatex', mainFile: 'docs/tesis.tex' });
-    const imageIndex = args.indexOf('latexweb-texlive:tl2026-1');
+    const imageIndex = args.indexOf('latexweb-texlive:tl2026-2');
     expect(args.slice(imageIndex + 1)).toEqual([
       '-norc',
       '-no-shell-escape',
@@ -297,7 +298,7 @@ describe('buildDockerRunArgs: usuario inválido', () => {
 describe('orden de los argumentos', () => {
   it('la imagen va tras el último flag de docker y luego los argumentos del script', () => {
     const args = build();
-    const imageIndex = args.indexOf('latexweb-texlive:tl2026-1');
+    const imageIndex = args.indexOf('latexweb-texlive:tl2026-2');
     expect(imageIndex).toBeGreaterThan(0);
     expect(args.slice(imageIndex + 1)).toEqual([
       '-norc',
@@ -352,10 +353,10 @@ describe('validaciones', () => {
   });
 
   it.each([
-    'latexweb-texlive:tl2026-1',
+    'latexweb-texlive:tl2026-2',
     'texlive/texlive:latest-full',
     `latexweb-texlive@sha256:${'a1'.repeat(32)}`,
-    `latexweb-texlive:tl2026-1@sha256:${'0f'.repeat(32)}`,
+    `latexweb-texlive:tl2026-2@sha256:${'0f'.repeat(32)}`,
   ])('acepta la imagen %s', (image) => {
     expect(build({ image })).toContain(image);
   });
@@ -434,4 +435,14 @@ describe('inyección', () => {
       throwsDockerArgsError({ mainFile });
     },
   );
+});
+
+describe('--ulimit fsize (tope por archivo)', () => {
+  it('pasa maxFileBytes como fsize en bytes', () => {
+    expect(valuesOf(build({ maxFileBytes: 12345 }), '--ulimit')).toEqual(['fsize=12345']);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])('rechaza maxFileBytes %s', (maxFileBytes) => {
+    throwsDockerArgsError({ maxFileBytes });
+  });
 });

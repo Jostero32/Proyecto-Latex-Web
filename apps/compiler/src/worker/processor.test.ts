@@ -65,6 +65,7 @@ function setup(s: Setup = {}): Harness {
     memory: '1g',
     pidsLimit: 128,
     tmpfsSize: '256m',
+    maxFileBytes: 52428801,
     runContainer,
     logError,
   };
@@ -269,5 +270,37 @@ describe('orden', () => {
     const h = setup();
     await h.processor({ id: ID, data: GOOD });
     expect(h.calls).toEqual([`prepareInputs:${ID}`, 'runContainer', `publishArtifacts:${ID}`, `cleanupWork:${ID}`]);
+  });
+});
+
+describe('piso de espacio libre', () => {
+  it('con menos espacio que minFreeBytes falla como infraestructura sin preparar ni compilar', async () => {
+    const h = setup();
+    const processor = createCompileProcessor({ ...h.deps, minFreeBytes: 1000, freeBytes: async () => 999 });
+    await expect(processor({ id: ID, data: GOOD })).rejects.toBeInstanceOf(InfrastructureError);
+    expect(h.prepareInputs).not.toHaveBeenCalled();
+    expect(h.calls).not.toContain('runContainer');
+    expect(h.logError).toHaveBeenCalled();
+  });
+
+  it('con espacio suficiente compila normalmente', async () => {
+    const h = setup();
+    const processor = createCompileProcessor({ ...h.deps, minFreeBytes: 1000, freeBytes: async () => 1000 });
+    await expect(processor({ id: ID, data: GOOD })).resolves.toMatchObject({ outcome: 'success' });
+  });
+
+  it('sin minFreeBytes no consulta el espacio', async () => {
+    const h = setup();
+    const freeBytes = vi.fn(async () => 0);
+    const processor = createCompileProcessor({ ...h.deps, freeBytes });
+    await processor({ id: ID, data: GOOD });
+    expect(freeBytes).not.toHaveBeenCalled();
+  });
+
+  it('pasa maxFileBytes a los argumentos de docker (--ulimit fsize)', async () => {
+    const h = setup();
+    await h.processor({ id: ID, data: GOOD });
+    const args = (h.runContainer.mock.calls[0]?.[0] as RunContainerOptions).args;
+    expect(args).toContain(`fsize=${h.deps.maxFileBytes}`);
   });
 });
