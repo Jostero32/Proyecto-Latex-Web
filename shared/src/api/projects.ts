@@ -78,6 +78,7 @@ export type ProjectsErrorCode =
   | 'invalid_zip'
   | 'too_many_files'
   | 'project_too_large'
+  | 'document_too_large'
   | 'file_too_large'
   | 'cannot_change_owner'
   | 'invalid_link';

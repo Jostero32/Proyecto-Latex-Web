@@ -6,8 +6,8 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import type { Db } from './db';
 import { createRequireUser, registerAuthHooks } from './features/auth/guard';
 import { authRoutes, type AuthDeps } from './features/auth/routes';
-import { createCollab, createProjectDocs } from './features/collab/documents';
-import { attachCollab } from './features/collab/websocket';
+import { createProjectDocs } from './features/collab/documents';
+import { attachCollab, createCollab } from './features/collab/websocket';
 import { compilationsRoutes, type CompilationsDeps } from './features/compilations/routes';
 import { filesRoutes } from './features/files/routes';
 import { createFilesService, type ProjectLimits } from './features/files/service';
@@ -41,6 +41,8 @@ export interface AppDeps {
 const MAX_MULTIPART_FIELDS = 10;
 /** Largo máximo de un campo de texto: rutas de hasta 255 caracteres con margen. */
 const MAX_MULTIPART_FIELD_BYTES = 1024;
+/** Tope de un documento de colaboración sin proyectos (tests del upgrade). */
+const DEFAULT_DOC_MAX_BYTES = 10 * 1024 * 1024;
 
 export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions = {}): Promise<FastifyInstance> {
   const app = Fastify(options);
@@ -49,8 +51,10 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
   registerRequestGuard(app, security);
   // Sin firma: la cookie de sesión es un token aleatorio de 32 bytes que solo vale si existe en la base.
   await app.register(cookie);
-  const hocuspocus = createCollab(deps.projects?.db);
-  attachCollab(app, hocuspocus, security);
+  const hocuspocus = deps.projects
+    ? createCollab({ db: deps.projects.db, docMaxBytes: deps.projects.limits.docMaxBytes })
+    : createCollab({ docMaxBytes: DEFAULT_DOC_MAX_BYTES });
+  attachCollab(app, hocuspocus, { guard: security, ...(deps.auth ? { auth: deps.auth.service } : {}) });
 
   await app.register(
     async (api) => {
@@ -70,7 +74,7 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
         const requireUser = createRequireUser(deps.auth.service);
         const projects = createProjectsService({ db, storage, docs, limits });
         const files = createFilesService({ db, storage, docs, limits });
-        const sharing = createSharingService(db);
+        const sharing = createSharingService(db, docs);
         await api.register(async (scope) => {
           registerApiErrorHandler(scope);
           // Datos privados de cada usuario: nunca en una caché compartida.

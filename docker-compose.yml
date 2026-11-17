@@ -119,6 +119,7 @@ services:
       PROJECT_MAX_BYTES:
       PROJECT_MAX_FILES:
       FILE_MAX_BYTES:
+      DOC_MAX_BYTES:
     volumes:
       - compile-storage:/data/compilations
     ports:

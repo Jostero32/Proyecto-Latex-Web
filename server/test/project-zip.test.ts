@@ -4,7 +4,7 @@ import type { ProjectLimits } from '../src/features/files/service';
 import { readZip } from '../src/features/projects/zip';
 import { makeZip, patchZip } from './helpers';
 
-const LIMITS: ProjectLimits = { maxBytes: 10_000, maxFiles: 5, fileMaxBytes: 8_000 };
+const LIMITS: ProjectLimits = { maxBytes: 10_000, maxFiles: 5, fileMaxBytes: 8_000, docMaxBytes: 10_000 };
 
 async function rejection(zip: Buffer, limits = LIMITS) {
   return readZip(zip, limits).then(

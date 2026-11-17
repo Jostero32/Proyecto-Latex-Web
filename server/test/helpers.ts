@@ -33,7 +33,7 @@ export async function resetDb(db: Db): Promise<void> {
   await db.execute(sql`TRUNCATE users, sessions, projects CASCADE`);
 }
 
-export const LIMITS: ProjectLimits = { maxBytes: 1024 * 1024, maxFiles: 20, fileMaxBytes: 512 * 1024 };
+export const LIMITS: ProjectLimits = { maxBytes: 1024 * 1024, maxFiles: 20, fileMaxBytes: 512 * 1024, docMaxBytes: 256 * 1024 };
 
 export interface Client {
   cookie: string;

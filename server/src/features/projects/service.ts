@@ -180,12 +180,14 @@ export function createProjectsService({ db, storage, docs, limits }: ProjectsDep
         .set({ ...changes, updatedAt: sql`now()` })
         .where(eq(projects.id, project.id))
         .returning();
+      docs.notify(project.id, 'project-changed');
       return toSummary(updated ?? project, role);
     },
 
     async remove(projectId) {
       // Primero las filas (en cascada: miembros, archivos, documento y enlaces); después los objetos.
       await db.delete(projects).where(eq(projects.id, projectId));
+      docs.disconnect(projectId);
       await storage.deletePrefix(projectPrefix(projectId));
     },
 

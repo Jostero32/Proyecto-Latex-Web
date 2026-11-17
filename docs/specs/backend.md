@@ -68,7 +68,9 @@ documento `project:<id>` exige `assertProjectAccess`, y el lector queda con `con
 `onLoadDocument` y `onStoreDocument` (debounce de 2 s, máximo 10 s) leen y guardan en `documents`. Al
 quitar a un miembro o bajarlo a lector, se cierran sus conexiones. Tope de tamaño por documento
 (`DOC_MAX_BYTES`). Cuando cambia el árbol por REST, se envía un mensaje stateless `files-changed` a los
-conectados.
+conectados (y `project-changed` cuando cambian nombre, documento principal o motor). La sesión se valida en
+el hook `upgrade` de crossws, que pasa el usuario como contexto de la conexión de Hocuspocus. Al guardar,
+se actualiza el tamaño de los archivos de texto editados por WebSocket (cuenta para los topes).
 
 **Compilación de proyectos**
 - El server serializa el `Y.Doc` y escribe una instantánea en `compilations/<cid>/input/`. Los binarios se

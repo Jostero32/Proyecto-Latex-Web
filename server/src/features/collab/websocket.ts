@@ -3,12 +3,22 @@
 //
 // Replica la unión que hace la clase `Server` de @hocuspocus/server 4.8 (adaptador de Node de
 // crossws → hocuspocus.handleConnection) pero sin crear un segundo servidor HTTP.
+//
+// Seguridad, en orden: Host y Origin (como la API), la cookie de sesión antes de aceptar el upgrade,
+// y en `onConnect` el permiso sobre el proyecto del documento (`project:<id>`): un lector queda en
+// solo lectura. Un documento no puede crecer más de `docMaxBytes`.
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { Hocuspocus, type WebSocketLike } from '@hocuspocus/server';
+import { Hocuspocus, type Document, type WebSocketLike } from '@hocuspocus/server';
 import crossws from 'crossws/adapters/node';
 import type { FastifyInstance } from 'fastify';
+import * as Y from 'yjs';
+import type { Db } from '../../db';
 import { isAllowedHost, isAllowedOrigin, type RequestGuardOptions } from '../../http';
+import { SESSION_COOKIE } from '../auth/guard';
+import type { AuthService } from '../auth/service';
+import { assertProjectAccess, roleAllows } from '../projects/service';
+import { loadDocument, projectIdOf, storeDocument, type CollabContext } from './documents';
 
 export const COLLAB_PATH = '/collab';
 
@@ -19,20 +29,84 @@ export const COLLAB_PATH = '/collab';
  */
 export const COLLAB_MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
 
+/** Código de cierre de la conexión a un documento que supera el tope. */
+export const DOC_TOO_LARGE_CODE = 4413;
+
 type ClientConnection = ReturnType<Hocuspocus['handleConnection']>;
 
-/**
- * Monta Hocuspocus en `app`. Hasta el paso 3 de docs/specs/backend.md (sesión en el upgrade y
- * permisos por proyecto) rechaza toda conexión: los documentos ya son los proyectos persistidos.
- */
-export function attachCollab(app: FastifyInstance, hocuspocus: Hocuspocus, guard: RequestGuardOptions): void {
+export interface CollabOptions {
+  /** Sin base: documentos en memoria y sin permisos (solo para los tests del upgrade). */
+  db?: Db;
+  docMaxBytes: number;
+}
+
+/** Hocuspocus con persistencia en `documents`, permisos por proyecto y tope de tamaño. */
+export function createCollab({ db, docMaxBytes }: CollabOptions): Hocuspocus {
+  // Tamaño estimado de cada documento abierto: el exacto (codificar el documento) se calcula solo
+  // cuando la suma de lo recibido se acerca al tope.
+  const estimates = new WeakMap<Document, number>();
+  const sizeOf = (document: Document) => Y.encodeStateAsUpdate(document).length;
+
+  return new Hocuspocus<CollabContext>({
+    name: 'collab',
+    quiet: true,
+    debounce: 2_000,
+    maxDebounce: 10_000,
+    ...(db
+      ? {
+          async onLoadDocument({ document, documentName }) {
+            const projectId = projectIdOf(documentName);
+            if (!projectId) throw new Error(`documento inválido: ${documentName}`);
+            await loadDocument(db, projectId, document);
+          },
+          async onStoreDocument({ document, documentName }) {
+            const projectId = projectIdOf(documentName);
+            if (projectId) await storeDocument(db, projectId, document);
+          },
+          // Antes de cargar el documento: un no miembro (o un nombre que no es de proyecto) no llega a
+          // abrirlo. Hocuspocus responde permission-denied a ese documento.
+          async onConnect({ documentName, context, connectionConfig }) {
+            const projectId = projectIdOf(documentName);
+            if (!projectId || !context.userId) throw new Error('documento o sesión inválidos');
+            const { role } = await assertProjectAccess(db, context.userId, projectId, 'read');
+            connectionConfig.readOnly = !roleAllows(role, 'write');
+          },
+        }
+      : {}),
+    async beforeHandleMessage({ document, update }) {
+      let estimate = (estimates.get(document) ?? sizeOf(document)) + update.length;
+      if (estimate > docMaxBytes) estimate = sizeOf(document) + update.length;
+      estimates.set(document, estimate);
+      if (estimate > docMaxBytes) {
+        throw Object.assign(new Error('documento demasiado grande'), { code: DOC_TOO_LARGE_CODE, reason: 'document-too-large' });
+      }
+    },
+  });
+}
+
+export interface AttachCollabOptions {
+  guard: RequestGuardOptions;
+  /** Sin auth se rechaza toda conexión (401). */
+  auth?: AuthService;
+}
+
+/** Monta Hocuspocus en `app`. Requiere @fastify/cookie registrado. */
+export function attachCollab(app: FastifyInstance, hocuspocus: Hocuspocus, { guard, auth }: AttachCollabOptions): void {
   const connections = new WeakMap<object, ClientConnection>();
 
   const websocket = crossws({
     serverOptions: { maxPayload: COLLAB_MAX_MESSAGE_BYTES },
     hooks: {
+      // La sesión se valida antes de aceptar el upgrade; el usuario queda en el contexto del peer.
+      async upgrade(request) {
+        const token = app.parseCookie(request.headers.get('cookie') ?? '')[SESSION_COOKIE];
+        const user = auth && token ? await auth.getUserBySessionToken(token) : null;
+        if (!user) return new Response(null, { status: 401, statusText: 'Unauthorized' });
+        return { context: { userId: user.id } };
+      },
       open(peer) {
-        const connection = hocuspocus.handleConnection(asWebSocketLike(peer.websocket), peer.request);
+        const context: CollabContext = { userId: String(peer.context.userId) };
+        const connection = hocuspocus.handleConnection(asWebSocketLike(peer.websocket), peer.request, context);
         connections.set(peer, connection);
         // Hocuspocus cierra las conexiones inactivas; un pong cuenta como actividad.
         (peer.websocket as { on?: (event: string, listener: () => void) => void }).on?.('pong', () =>
@@ -73,8 +147,8 @@ export function attachCollab(app: FastifyInstance, hocuspocus: Hocuspocus, guard
       return;
     }
     // El navegador deja que cualquier página abra un WebSocket a 127.0.0.1 (no hay CORS): sin
-    // esto, otro sitio que el usuario visite podría leer y escribir documentos. Host contra DNS
-    // rebinding; Origin contra sitios ajenos (sin Origin = no es un navegador).
+    // esto, otro sitio que el usuario visite podría usar su cookie para leer y escribir documentos.
+    // Host contra DNS rebinding; Origin contra sitios ajenos (sin Origin = no es un navegador).
     if (!isAllowedHost(request.headers.host, guard)) {
       rejectUpgrade(socket, 403, 'Forbidden');
       return;
@@ -84,33 +158,25 @@ export function attachCollab(app: FastifyInstance, hocuspocus: Hocuspocus, guard
       rejectUpgrade(socket, 403, 'Forbidden');
       return;
     }
-
-    // Paso 3: validar aquí la sesión (cookie httpOnly) antes de aceptar el upgrade, y el permiso
-    // sobre el proyecto en onConnect. Mientras tanto no se acepta ninguna conexión.
-    if (!COLLAB_ENABLED) {
-      rejectUpgrade(socket, 401, 'Unauthorized');
-      return;
-    }
-    try {
-      // Mismo hook que dispara la clase Server de Hocuspocus antes del upgrade (extensiones).
-      await hocuspocus.hooks('onUpgrade', { request, socket, head, instance: hocuspocus });
-      await websocket.handleUpgrade(request, socket, head);
-    } catch (error) {
-      app.log.warn({ err: error }, 'upgrade de WebSocket rechazado en collab');
-      rejectUpgrade(socket, 400, 'Bad Request');
-    }
+    await websocket.handleUpgrade(request, socket, head);
   }
 
   // preClose y no onClose: onClose corre después de que el servidor HTTP terminó de cerrarse, y
-  // eso no ocurre mientras haya WebSockets abiertos (app.close() quedaría colgado).
+  // eso no ocurre mientras haya WebSockets abiertos (app.close() quedaría colgado). Antes de cerrar,
+  // se guardan los documentos con cambios pendientes (el debounce).
   app.addHook('preClose', async () => {
     hocuspocus.closeConnections();
     websocket.closeAll(1001, 'servidor cerrándose');
+    hocuspocus.flushPendingStores();
+    await waitForUnload(hocuspocus);
   });
 }
 
-/** false hasta que /collab autentique (paso 3 de docs/specs/backend.md). */
-const COLLAB_ENABLED = false as boolean;
+/** Espera a que los documentos abiertos se guarden y se descarguen (hasta 5 s). */
+async function waitForUnload(hocuspocus: Hocuspocus): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (hocuspocus.documents.size > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+}
 
 /** crossws tipa el socket como Partial<WebSocket> (su propio tipo); Hocuspocus necesita send, close y readyState. */
 function asWebSocketLike(socket: object): WebSocketLike {

@@ -72,6 +72,7 @@ export function loadConfig(env: Env = process.env): ServerConfig {
       maxBytes: envPositiveInteger(env, 'PROJECT_MAX_BYTES', 200 * MB),
       maxFiles: envPositiveInteger(env, 'PROJECT_MAX_FILES', 500),
       fileMaxBytes: envPositiveInteger(env, 'FILE_MAX_BYTES', 50 * MB),
+      docMaxBytes: envPositiveInteger(env, 'DOC_MAX_BYTES', 10 * MB),
     },
     compilations: {
       storageDir: env.COMPILE_STORAGE_DIR ?? join(tmpdir(), DEFAULT_STORAGE_DIRNAME),

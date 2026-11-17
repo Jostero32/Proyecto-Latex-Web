@@ -13,6 +13,7 @@ import { and, asc, eq, gt, isNull, or } from 'drizzle-orm';
 import type { Db } from '../../db';
 import { ApiError } from '../../http';
 import { projectMembers, shareLinks, users } from '../../schema';
+import type { ProjectDocs } from '../collab/documents';
 import { higherRole } from '../projects/service';
 
 const MAX_LINK_DAYS = 365;
@@ -45,7 +46,7 @@ export interface SharingService {
   join(userId: string, token: string): Promise<JoinResponse>;
 }
 
-export function createSharingService(db: Db): SharingService {
+export function createSharingService(db: Db, docs: ProjectDocs): SharingService {
   async function member(projectId: string, userId: string): Promise<ProjectMember> {
     const [row] = isUuid(userId)
       ? await db
@@ -81,12 +82,15 @@ export function createSharingService(db: Db): SharingService {
         .update(projectMembers)
         .set({ role })
         .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, target.userId)));
+      // Sus conexiones se reconectan con el rol nuevo (de lector, en solo lectura).
+      if (role !== target.role) docs.disconnect(projectId, target.userId);
       return { ...target, role };
     },
 
     async removeMember(projectId, userId) {
       const target = await changeableMember(projectId, userId);
       await db.delete(projectMembers).where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, target.userId)));
+      docs.disconnect(projectId, target.userId);
     },
 
     async createLink(projectId, createdBy, rawRole, rawDays) {

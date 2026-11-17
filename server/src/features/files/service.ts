@@ -19,6 +19,8 @@ export interface ProjectLimits {
   maxFiles: number;
   /** Tamaño máximo de un archivo. */
   fileMaxBytes: number;
+  /** Suma de los archivos de texto: es el documento de colaboración, que vive en memoria al editarlo. */
+  docMaxBytes: number;
 }
 
 export interface IncomingFile {
@@ -129,11 +131,20 @@ export function prepareFiles(incoming: readonly IncomingFile[], existing: readon
   if (kept.length + prepared.length > limits.maxFiles) {
     throw new ApiError(413, 'too_many_files', `Un proyecto tiene como máximo ${limits.maxFiles} archivos`);
   }
-  const total = kept.reduce((sum, f) => sum + f.size, 0) + prepared.reduce((sum, f) => sum + f.size, 0);
-  if (total > limits.maxBytes) {
+  const all = [...kept, ...prepared];
+  if (sumSizes(all) > limits.maxBytes) {
     throw new ApiError(413, 'project_too_large', `Un proyecto ocupa como máximo ${limits.maxBytes} bytes`);
   }
+  checkTextTotal(all, limits);
   return prepared;
+}
+
+const sumSizes = (list: readonly { size: number }[]) => list.reduce((sum, f) => sum + f.size, 0);
+
+function checkTextTotal(list: readonly { kind: string; size: number }[], limits: ProjectLimits): void {
+  if (sumSizes(list.filter((f) => f.kind === 'text')) > limits.docMaxBytes) {
+    throw new ApiError(413, 'document_too_large', `El texto de un proyecto ocupa como máximo ${limits.docMaxBytes} bytes`);
+  }
 }
 
 export function toProjectFile(row: FileRow): ProjectFile {
@@ -221,6 +232,7 @@ export function createFilesService({ db, storage, docs, limits }: FilesDeps): Fi
       const stale = prepared.filter((f) => f.kind === 'text' && previous.get(f.id)?.kind === 'binary');
       await storage.delete(stale.map((f) => fileKey(projectId, f.id)));
 
+      docs.notify(projectId, 'files-changed');
       const ids = new Set(prepared.map((f) => f.id));
       return (await service.list(projectId)).filter((f) => ids.has(f.id));
     },
@@ -242,10 +254,11 @@ export function createFilesService({ db, storage, docs, limits }: FilesDeps): Fi
       if (size > limits.fileMaxBytes) {
         throw new ApiError(413, 'file_too_large', `El archivo supera el máximo de ${limits.fileMaxBytes} bytes`);
       }
-      const others = (await existingFiles(projectId)).filter((f) => f.id !== file.id);
-      if (others.reduce((sum, f) => sum + f.size, 0) + size > limits.maxBytes) {
+      const all = [...(await existingFiles(projectId)).filter((f) => f.id !== file.id), { kind: 'text', size }];
+      if (sumSizes(all) > limits.maxBytes) {
         throw new ApiError(413, 'project_too_large', `Un proyecto ocupa como máximo ${limits.maxBytes} bytes`);
       }
+      checkTextTotal(all, limits);
       await docs.change(projectId, (map) => {
         const text = map.get(file.id);
         if (text) replaceText(text, content);
@@ -274,6 +287,8 @@ export function createFilesService({ db, storage, docs, limits }: FilesDeps): Fi
           await tx.update(projects).set({ ...main, updatedAt: sql`now()` }).where(eq(projects.id, project.id));
           return updated;
         });
+        docs.notify(project.id, 'files-changed');
+        if (project.mainFile === file.path) docs.notify(project.id, 'project-changed');
         return toProjectFile(row ?? file);
       } catch (error) {
         if (isUniqueViolation(error)) throw new ApiError(409, 'path_conflict', 'Ya existe un archivo con esa ruta');
@@ -287,6 +302,7 @@ export function createFilesService({ db, storage, docs, limits }: FilesDeps): Fi
       await touchProject(projectId);
       if (file.kind === 'text') await docs.change(projectId, (map) => map.delete(file.id));
       else await storage.delete([fileKey(projectId, file.id)]);
+      docs.notify(projectId, 'files-changed');
     },
   };
   return service;
