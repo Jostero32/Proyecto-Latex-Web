@@ -5,24 +5,22 @@ coverage/
 *.log
 
 # Artefactos de compilación LaTeX en fixtures
-fixtures/latex/**/*.aux
-fixtures/latex/**/*.log
-fixtures/latex/**/*.fls
-fixtures/latex/**/*.fdb_latexmk
-fixtures/latex/**/*.bbl
-fixtures/latex/**/*.bcf
-fixtures/latex/**/*.blg
-fixtures/latex/**/*.run.xml
-fixtures/latex/**/*.out
-fixtures/latex/**/*.nav
-fixtures/latex/**/*.snm
-fixtures/latex/**/*.toc
-fixtures/latex/**/*.xdv
-fixtures/latex/**/*.pdf
-!fixtures/latex/con-imagenes/figuras/*.pdf
+compiler/test/fixtures/**/*.aux
+compiler/test/fixtures/**/*.log
+compiler/test/fixtures/**/*.fls
+compiler/test/fixtures/**/*.fdb_latexmk
+compiler/test/fixtures/**/*.bbl
+compiler/test/fixtures/**/*.bcf
+compiler/test/fixtures/**/*.blg
+compiler/test/fixtures/**/*.run.xml
+compiler/test/fixtures/**/*.out
+compiler/test/fixtures/**/*.nav
+compiler/test/fixtures/**/*.snm
+compiler/test/fixtures/**/*.toc
+compiler/test/fixtures/**/*.xdv
+compiler/test/fixtures/**/*.pdf
+!compiler/test/fixtures/con-imagenes/figuras/*.pdf
 # Rastros del fixture malicioso si alguna vez se compila sin sandbox
-fixtures/latex/malicioso/pwned-*.txt
-fixtures/latex/malicioso/passwd-robado.txt
+compiler/test/fixtures/malicioso/pwned-*.txt
+compiler/test/fixtures/malicioso/passwd-robado.txt
 
-# Cliente de Prisma generado (prisma generate, en el postinstall de apps/server)
-apps/server/src/generated/

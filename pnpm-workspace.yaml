@@ -1,9 +1,8 @@
 packages:
-  - apps/*
-  - packages/*
+  - server
+  - compiler
+  - web
+  - shared
 allowBuilds:
   esbuild: true
-  # Descargan el motor de migraciones de Prisma (docs/specs/auth.md).
-  '@prisma/engines': true
-  prisma: true
   msgpackr-extract: false

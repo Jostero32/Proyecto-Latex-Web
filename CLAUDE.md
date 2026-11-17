@@ -13,8 +13,8 @@ visual sobre el mismo documento. Plan y estado: `docs/roadmap.md`.
   Redis (cola) y MinIO
 - `shared/`: contratos de la API (tipos y códigos de error) y utilidades puras comunes
 
-> Paso 1 de `docs/specs/backend.md` pendiente: el código todavía está en `apps/` y `packages/`, usa Prisma
-> y comparte disco entre server y compiler.
+> Hasta el paso 4 de `docs/specs/backend.md`, server y compiler todavía comparten un disco
+> (`COMPILE_STORAGE_DIR`) y existe `POST /api/compilations` con subida multipart.
 
 ## Comandos
 - Instalar: `pnpm install`
@@ -24,7 +24,7 @@ visual sobre el mismo documento. Plan y estado: `docs/roadmap.md`.
 - Tests (con postgres, redis y minio levantados): `pnpm test`
 - Tests de compilación real con Docker y TeX Live (lentos): `pnpm test:compile`
 - Lint y tipos: `pnpm lint && pnpm typecheck`
-- Base de datos: cambiar `server/src/schema.ts` y generar la migración con `pnpm --filter server db:generate`.
+- Base de datos: cambiar `server/src/schema.ts` y generar la migración con `pnpm db:generate`.
   El server aplica las migraciones pendientes al arrancar.
 
 ## Estructura de carpetas
@@ -46,7 +46,7 @@ server/
   test/             tests del server
 compiler/
   texlive/          imagen de TeX Live de las compilaciones
-  src/              index.ts, config.ts, processor.ts, docker.ts, workspace.ts, storage.ts, log.ts
+  src/              index.ts, config.ts, processor.ts, docker.ts, workspace.ts (y storage.ts y log.ts en el paso 4)
   test/             tests del compiler; test/fixtures/ con los proyectos LaTeX de prueba
 web/
   src/              main.tsx, app/ (router, providers, layout), lib/ (api.ts), components/ (UI genérica),

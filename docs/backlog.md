@@ -13,7 +13,6 @@ momento (CLAUDE.md, "Forma de trabajo"). Ordenado por prioridad dentro de cada s
 | baja | auth | Cookie `sid` sin prefijo `__Host-` (cookie tossing desde un subdominio): usar `__Host-sid` cuando `COOKIE_SECURE=true`. |
 | baja | auth | `web` comparte la red `default` con `postgres`, y `server` usa el mismo usuario de base (con DDL) que `migrate`: red propia para postgres y un rol solo DML para el server. |
 | baja | compilación | biber usa 49 de sus 83 bibliotecas nativas precalentadas; una función rara que necesite otra falla con "Read-only file system". |
-| baja | auth | Aviso de Prisma en la imagen ("failed to detect the libssl/openssl version"): funciona, pero conviene instalar `openssl` en la etapa `server-build`. |
 | baja | auth | El rate limit guarda claves con el prefijo `latexweb-ratelimit-undefinedundefined-…` (cosmético, del plugin con `app.rateLimit()`). |
 
 ## Fuera de alcance (pendiente de spec)

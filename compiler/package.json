@@ -1,0 +1,18 @@
+{
+  "name": "@latexweb/compiler",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../.env src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "image:build": "docker build -t latexweb-texlive:tl2026-2 texlive"
+  },
+  "dependencies": {
+    "@latexweb/shared": "workspace:*",
+    "bullmq": "^6.7.5",
+    "ioredis": "^6.0.0",
+    "tsx": "^4.23.15"
+  }
+}

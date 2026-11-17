@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Imágenes de las apps para docker compose. Ver docs/specs/docker-compose.md.
 # Un target por app: server, compiler y web. La imagen de TeX Live de las compilaciones se construye
-# aparte (apps/compiler/docker/Dockerfile).
+# aparte (compiler/texlive/Dockerfile).
 #
 # Sin paso de build: las apps de Node corren con tsx (dependencia de cada app), igual que en
 # desarrollo. Se arrancan con `node` directamente (no `pnpm start`) para que las señales de apagado
@@ -21,47 +21,32 @@ RUN corepack enable pnpm && corepack install && chmod -R a+rX /opt/corepack
 
 # Manifiestos del workspace (la capa de dependencias se reutiliza si no cambian).
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/server/package.json apps/server/
-COPY apps/compiler/package.json apps/compiler/
-COPY apps/web/package.json apps/web/
-COPY packages/shared/package.json packages/shared/
+COPY server/package.json server/
+COPY compiler/package.json compiler/
+COPY web/package.json web/
+COPY shared/package.json shared/
 COPY tsconfig.base.json ./
-COPY packages/shared packages/shared
+COPY shared shared
 # Raíz de almacenamiento compartida (volumen latexweb-compile-storage). Docker inicializa un volumen
 # vacío copiando este directorio de la imagen, con su dueño: así el usuario `node` (uid 1000) del
 # server puede crear las carpetas de cada compilación.
 RUN mkdir -p /data/compilations && chown node:node /data/compilations
 
-# --- Prisma: cliente generado y migraciones ---
-# Con las dependencias de desarrollo (la CLI de prisma). El postinstall de apps/server corre
-# `prisma generate` y deja el cliente en apps/server/src/generated.
-FROM base AS server-build
-COPY apps/server/prisma apps/server/prisma
-COPY apps/server/prisma.config.ts apps/server/
-RUN pnpm install --frozen-lockfile --filter "@latexweb/server..."
-
-# Servicio de una sola ejecución: aplica las migraciones pendientes y termina.
-FROM server-build AS migrate
-WORKDIR /app/apps/server
-USER node
-ENV HOME=/tmp
-CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
-
 # --- API REST + colaboración ---
 FROM base AS server
-# Solo producción y sin scripts: el cliente de Prisma viene ya generado de server-build.
+# Solo producción y sin scripts. Las migraciones (drizzle/) las aplica el server al arrancar.
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts --filter "@latexweb/server..."
-COPY apps/server/tsconfig.json apps/server/
-COPY apps/server/src apps/server/src
-COPY --from=server-build /app/apps/server/src/generated apps/server/src/generated
-WORKDIR /app/apps/server
+COPY server/tsconfig.json server/
+COPY server/src server/src
+COPY server/drizzle server/drizzle
+WORKDIR /app/server
 USER node
 # SERVER_HOST=0.0.0.0 lo define docker-compose.yml y no la imagen: un `docker run -p` suelto no debe
 # publicar en todas las interfaces una API sin autenticación.
 ENV SERVER_PORT=3000
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
 CMD ["node", "node_modules/tsx/dist/cli.mjs", "src/index.ts"]
 
 # --- Worker de compilación ---
@@ -70,18 +55,18 @@ CMD ["node", "node_modules/tsx/dist/cli.mjs", "src/index.ts"]
 FROM base AS compiler
 RUN pnpm install --frozen-lockfile --prod --filter "@latexweb/compiler..."
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
-COPY apps/compiler/tsconfig.json apps/compiler/
-COPY apps/compiler/src apps/compiler/src
-WORKDIR /app/apps/compiler
+COPY compiler/tsconfig.json compiler/
+COPY compiler/src compiler/src
+WORKDIR /app/compiler
 CMD ["node", "node_modules/tsx/dist/cli.mjs", "src/index.ts"]
 
 # --- Frontend ---
 FROM base AS web
 # vite y el plugin de React son devDependencies de web: hacen falta para el build y para `preview`.
 RUN pnpm install --frozen-lockfile --filter "@latexweb/web..."
-COPY apps/web apps/web
+COPY web web
 RUN pnpm --filter @latexweb/web build
-WORKDIR /app/apps/web
+WORKDIR /app/web
 USER node
 EXPOSE 5173
 CMD ["node", "node_modules/vite/bin/vite.js", "preview", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]

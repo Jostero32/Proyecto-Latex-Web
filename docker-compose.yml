@@ -79,27 +79,11 @@ services:
 
   # Solo construye la imagen de las compilaciones y termina; compiler espera a que termine bien.
   texlive-image:
-    build: ./apps/compiler/docker
+    build: ./compiler/texlive
     image: latexweb-texlive:tl2026-2
     entrypoint: ["true"]
     restart: "no"
     network_mode: none
-
-  # Aplica las migraciones de Prisma y termina; server espera a que termine bien.
-  migrate:
-    <<: *hardening
-    restart: "no"
-    build:
-      context: .
-      target: migrate
-    image: latexweb-migrate:dev
-    tmpfs:
-      - /tmp:rw,nosuid,nodev,noexec,size=64m
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-latexweb}:${POSTGRES_PASSWORD:-latexweb}@postgres:5432/${POSTGRES_DB:-latexweb}
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   server:
     <<: *hardening
@@ -136,8 +120,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
 
   compiler:
     <<: *hardening
@@ -191,7 +175,7 @@ services:
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=64m
       # `vite preview` compila vite.config.ts aquí al arrancar.
-      - /app/apps/web/node_modules/.vite-temp:rw,nosuid,nodev,noexec,size=16m,uid=1000,gid=1000,mode=0700
+      - /app/web/node_modules/.vite-temp:rw,nosuid,nodev,noexec,size=16m,uid=1000,gid=1000,mode=0700
     ports:
       - "127.0.0.1:${WEB_PORT:-5173}:5173"
     depends_on:
