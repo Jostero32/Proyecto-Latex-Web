@@ -42,11 +42,21 @@ export function attachCollab(app: FastifyInstance): Hocuspocus {
   });
 
   app.server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
-    void handleUpgrade(request, socket, head);
+    // Nunca dejar una promesa rechazada sin manejar: en Node 22 eso termina el proceso, y con él
+    // la API y la colaboración.
+    handleUpgrade(request, socket, head).catch((error: unknown) => {
+      app.log.error({ err: error }, 'error inesperado en el upgrade de WebSocket');
+      rejectUpgrade(socket, 500, 'Internal Server Error');
+    });
   });
 
   async function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
-    const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+    const path = parsePath(request.url);
+    if (path === null) {
+      // p. ej. `GET //% HTTP/1.1`: el parser de URL lanza y antes tumbaba el proceso.
+      rejectUpgrade(socket, 400, 'Bad Request');
+      return;
+    }
     if (path !== COLLAB_PATH) {
       rejectUpgrade(socket, 404, 'Not Found');
       return;
@@ -88,6 +98,15 @@ function isWebSocketLike(socket: object): socket is WebSocketLike {
     typeof candidate.close === 'function' &&
     typeof candidate.readyState === 'number'
   );
+}
+
+/** Ruta de la petición, o null si la URL no se puede interpretar. */
+function parsePath(url: string | undefined): string | null {
+  try {
+    return new URL(url ?? '/', 'http://localhost').pathname;
+  } catch {
+    return null;
+  }
 }
 
 function rejectUpgrade(socket: Duplex, status: number, message: string): void {

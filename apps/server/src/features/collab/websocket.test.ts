@@ -1,4 +1,5 @@
 import type { AddressInfo } from 'node:net';
+import { connect as connect_ } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
@@ -154,5 +155,32 @@ describe('apps/server: API REST y colaboración en el mismo puerto', () => {
     await app.close();
     expect(await closed).toBeGreaterThanOrEqual(1000);
     // afterEach vuelve a llamar a close(): Fastify lo tolera.
+  });
+});
+
+describe('upgrade con una URL que no se puede interpretar', () => {
+  /** Manda una petición de upgrade cruda y devuelve la primera línea de la respuesta. */
+  function rawUpgrade(target: string): Promise<string> {
+    return new Promise((resolve) => {
+      const [host, port] = base.split(':');
+      const socket = connect_(Number(port), host ?? '127.0.0.1', () => {
+        socket.write(
+          `GET ${target} HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+            'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n',
+        );
+      });
+      let response = '';
+      socket.on('data', (chunk: Buffer) => (response += chunk.toString()));
+      socket.on('close', () => resolve(response.split('\r\n')[0] ?? ''));
+      socket.on('error', () => resolve(response.split('\r\n')[0] ?? ''));
+    });
+  }
+
+  // Regresión: `new URL()` lanzaba fuera del try y la promesa rechazada sin manejar terminaba el
+  // proceso (API y colaboración caídas con una sola petición).
+  it.each(['//%', 'http://['])('%s → 400 y el servidor sigue respondiendo', async (target) => {
+    expect(await rawUpgrade(target)).toBe('HTTP/1.1 400 Bad Request');
+    const health = await fetch(`http://${base}/health`);
+    expect(health.status).toBe(200);
   });
 });
