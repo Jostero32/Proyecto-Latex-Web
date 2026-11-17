@@ -4,11 +4,11 @@
 #
 # Uso (lo arma el worker; ver compiler/src/docker.ts):
 #   latexweb-compile.sh -norc -no-shell-escape -interaction=nonstopmode -file-line-error \
-#                       -jobname=output <-pdf|-pdfxe|-pdflua> <mainFile>
+#                       -synctex=1 -jobname=output <-pdf|-pdfxe|-pdflua> <mainFile>
 #
 # - /in   proyecto del usuario (solo lectura)
 # - /work tmpfs de tamaño fijo donde se compila
-# - /out  destino de output.pdf y output.log
+# - /out  destino de output.pdf, output.log, output.synctex.gz y output.blg
 #
 # Código de salida: el de latexmk (0 ok, 12 error de LaTeX…), 124 si se agotó
 # LATEXWEB_TIMEOUT, 137 si hubo que matarlo con KILL, 2 si los argumentos son inválidos.
@@ -38,7 +38,7 @@ while [ "$#" -gt 0 ]; do
   arg="$1"
   shift
   case "$arg" in
-    -norc | -no-shell-escape | -interaction=nonstopmode | -file-line-error | -jobname=output) ;;
+    -norc | -no-shell-escape | -interaction=nonstopmode | -file-line-error | -synctex=1 | -jobname=output) ;;
     -pdf | -pdfxe | -pdflua)
       [ -z "$engine" ] || fail "motor repetido: $arg"
       engine="$arg"
@@ -83,13 +83,13 @@ chmod 0500 /out 2>/dev/null || echo "latexweb-compile: aviso: no se pudo quitar 
 
 status=0
 timeout -k 5 "$timeout_s" \
-  latexmk -norc -no-shell-escape -interaction=nonstopmode -file-line-error -jobname=output \
+  latexmk -norc -no-shell-escape -interaction=nonstopmode -file-line-error -synctex=1 -jobname=output \
   "$engine" "$main" || status=$?
 
 chmod 0700 /out 2>/dev/null || true
 # Se publican solo archivos regulares (nunca symlinks) aunque la compilación haya fallado,
 # para que el usuario pueda leer el log.
-for artifact in output.pdf output.log; do
+for artifact in output.pdf output.log output.synctex.gz output.blg; do
   if [ -f "$artifact" ] && [ ! -L "$artifact" ]; then
     cp "$artifact" "/out/$artifact"
   fi

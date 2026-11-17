@@ -106,6 +106,7 @@ describe('argumentos de docker run', () => {
       '-no-shell-escape',
       '-interaction=nonstopmode',
       '-file-line-error',
+      '-synctex=1',
       '-jobname=output',
       '-pdfxe',
       'docs/tesis.tex',

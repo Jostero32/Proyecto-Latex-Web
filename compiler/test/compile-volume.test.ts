@@ -39,7 +39,7 @@ describe('modo volumen con Docker real', () => {
 
   async function compile(fixture: string) {
     const id = randomUUID();
-    // Lo que harían server (input/) y prepareInputs del worker en contenedor (out/ del uid 1000).
+    // Lo que haría el worker en contenedor: bajar el proyecto a input/ y preparar out/ para el uid 10001.
     const prep = inVolume(
       `mkdir -p /data/${id}/input /data/${id}/out && cp -R /src/. /data/${id}/input/ && chown 10001:10001 /data/${id}/out`,
       ['--mount', `type=bind,source=${FIXTURES}${fixture},target=/src,readonly`],
@@ -122,7 +122,7 @@ describe('modo volumen con Docker real', () => {
     });
     const files = inVolume(`ls /data/${id}/out`).stdout.trim().split('\n').sort();
     // Solo los artefactos que copia el script al terminar; nada escrito por biber durante la compilación.
-    expect(files.every((f) => f === 'output.pdf' || f === 'output.log')).toBe(true);
+    expect(files.every((f) => ['output.pdf', 'output.log', 'output.synctex.gz', 'output.blg'].includes(f))).toBe(true);
     expect(files).toContain('output.log');
   }, 180_000);
 

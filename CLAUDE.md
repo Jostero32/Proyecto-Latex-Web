@@ -13,8 +13,8 @@ visual sobre el mismo documento. Plan y estado: `docs/roadmap.md`.
   Redis (cola) y MinIO
 - `shared/`: contratos de la API (tipos y códigos de error) y utilidades puras comunes
 
-> Hasta el paso 4 de `docs/specs/backend.md`, server y compiler todavía comparten un disco
-> (`COMPILE_STORAGE_DIR`) y existe `POST /api/compilations` con subida multipart.
+- Documentación de la API: Swagger UI en `/api/docs` (OpenAPI en `/api/docs/json`), generada de los
+  esquemas de cada ruta
 
 ## Comandos
 - Instalar: `pnpm install`
@@ -39,14 +39,16 @@ server/
     config.ts       único lugar donde se lee process.env
     db.ts           cliente de Drizzle y migrar
     schema.ts       todas las tablas
-    http.ts         lo transversal de HTTP: respuestas de error, guardas de Host y Origin
+    http.ts         lo transversal de HTTP: ApiError y respuestas de error, guardas de Host y Origin
+    openapi.ts      Swagger y los esquemas compartidos de las respuestas
     storage.ts      cliente S3 (MinIO)
-    features/<f>/   routes.ts, service.ts y lo que la feature necesite (auth, projects, files, collab, compile)
+    features/<f>/   routes.ts, service.ts y lo que la feature necesite
+                    (auth, projects, files, sharing, collab, compile)
   drizzle/          migraciones SQL generadas
   test/             tests del server
 compiler/
   texlive/          imagen de TeX Live de las compilaciones
-  src/              index.ts, config.ts, processor.ts, docker.ts, workspace.ts (y storage.ts y log.ts en el paso 4)
+  src/              index.ts, config.ts, processor.ts, docker.ts, workspace.ts, storage.ts, log.ts
   test/             tests del compiler; test/fixtures/ con los proyectos LaTeX de prueba
 web/
   src/              main.tsx, app/ (router, providers, layout), lib/ (api.ts), components/ (UI genérica),
@@ -56,6 +58,10 @@ shared/src/         api/ (contratos por feature) y utilidades puras (project-pat
 
 - Las features se importan entre sí por sus archivos (`../auth/service`), sin `index.ts` de reexportación.
 - Una feature no importa las rutas de otra; comparte lógica a través de su `service.ts`.
+- Cada ruta declara su `schema` (tags, summary, params, body y response con los componentes de
+  `openapi.ts`): es la documentación y la serialización. Un cuerpo multipart es solo documentación
+  (`validatorCompiler: skipValidation`). No usar `enum` ni `required` en un cuerpo cuando el servicio
+  ya responde un código de error más específico.
 
 ## Tests
 - Van en `<app>/test/`, no al lado del código. `pnpm test` los corre todos menos los de compilación real.

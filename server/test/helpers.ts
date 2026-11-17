@@ -6,7 +6,9 @@ import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fas
 import { buildApp } from '../src/app';
 import { createDb, type Db } from '../src/db';
 import { createAuthService, type AuthService } from '../src/features/auth/service';
+import type { CompileQueue, JobSnapshot } from '../src/features/compile/queue';
 import type { ProjectLimits } from '../src/features/files/service';
+import type { CompileJobData } from '@latexweb/shared';
 import { createStorage, type Storage } from '../src/storage';
 
 export const ORIGIN = 'http://localhost:5173';
@@ -30,7 +32,7 @@ export function testStorage(): Storage {
 
 /** Vacía todas las tablas de la app. */
 export async function resetDb(db: Db): Promise<void> {
-  await db.execute(sql`TRUNCATE users, sessions, projects CASCADE`);
+  await db.execute(sql`TRUNCATE users, sessions, projects, compilations CASCADE`);
 }
 
 export const LIMITS: ProjectLimits = { maxBytes: 1024 * 1024, maxFiles: 20, fileMaxBytes: 512 * 1024, docMaxBytes: 256 * 1024 };
@@ -48,18 +50,51 @@ export interface Client {
   upload(url: string, files: Record<string, string | Buffer>, fields?: Record<string, string>): Promise<LightMyRequestResponse>;
 }
 
+export interface FakeQueue extends CompileQueue {
+  added: CompileJobData[];
+  waiting: number;
+  jobs: Map<string, JobSnapshot>;
+}
+
+/** Cola de compilación en memoria: lo encolado queda en `added`; el estado de cada job se fija a mano. */
+export function fakeQueue(): FakeQueue {
+  const queue: FakeQueue = {
+    added: [],
+    waiting: 0,
+    jobs: new Map(),
+    async add(data) {
+      queue.added.push(data);
+      queue.jobs.set(data.compilationId, { state: 'queued', data, createdAt: Date.now() });
+    },
+    async waitingCount() {
+      return queue.waiting;
+    },
+    async get(id) {
+      return queue.jobs.get(id) ?? null;
+    },
+    async close() {},
+  };
+  return queue;
+}
+
 export interface ProjectsHarness {
   app: FastifyInstance;
   auth: AuthService;
+  queue: FakeQueue;
   user(email: string): Promise<Client>;
 }
 
 export async function projectsApp(db: Db, storage: Storage, limits: ProjectLimits = LIMITS): Promise<ProjectsHarness> {
   const auth = createAuthService(db);
-  const app = await buildApp({ auth: { service: auth, cookieSecure: false }, projects: { db, storage, limits } });
+  const queue = fakeQueue();
+  const app = await buildApp({
+    auth: { service: auth, cookieSecure: false },
+    projects: { db, storage, limits, queue, compile: { maxQueued: 5, ttlSeconds: 3600 } },
+  });
   return {
     app,
     auth,
+    queue,
     async user(email) {
       const session = await auth.register({ email, password: 'clave-larga-1', name: email.split('@')[0] });
       const cookie = `sid=${session.token}`;

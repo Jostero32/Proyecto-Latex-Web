@@ -15,6 +15,13 @@
       "when": 1794936757979,
       "tag": "0001_proyectos_archivos_y_permisos",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794938509215,
+      "tag": "0002_compilaciones",
+      "breakpoints": true
     }
   ]
 }

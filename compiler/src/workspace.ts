@@ -1,14 +1,13 @@
-// Directorios de trabajo de las compilaciones en el disco compartido con la API.
-// Ver docs/specs/compilacion.md, sección "Almacenamiento (directorio compartido)".
+// Directorio de trabajo del worker (su propio volumen; no se comparte con el server).
 //
-//   <root>/<id>/input/**         archivos del proyecto (los escribe la API)
-//   <root>/<id>/out/             montado en el contenedor como /out
-//   <root>/<id>/output.pdf|log   artefactos publicados por el worker (los sirve la API)
+//   <root>/<id>/input/**   instantánea del proyecto, bajada de MinIO (se monta en /in, solo lectura)
+//   <root>/<id>/out/       montado en el contenedor como /out: output.pdf, .log, .synctex.gz y .blg
 //
-// Cuando se reemplace por MinIO, solo cambia esta implementación: el processor usa la interfaz.
-import { constants, lstat, mkdir, open, readdir, rename, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { ARTIFACT_FILES, isCompilationId } from '@latexweb/shared';
+// Lo que deja la compilación viene del documento del usuario: no es confiable. Solo se leen archivos
+// regulares (nunca symlinks) y con topes de tamaño.
+import { constants, lstat, mkdir, open, readdir, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { isCompilationId, isIgnoredPath, normalizeProjectPath } from '@latexweb/shared';
 import { isSafeMountSource, type ContainerUser } from './docker';
 
 export interface WorkspacePaths {
@@ -18,13 +17,15 @@ export interface WorkspacePaths {
   outputDir: string;
 }
 
-export interface PublishResult {
-  hasPdf: boolean;
-  /** La compilación generó un PDF regular pero superaba maxPdfBytes y no se publicó. */
+export interface Artifacts {
+  pdf: Buffer | null;
+  /** La compilación generó un PDF pero superaba maxPdfBytes. */
   pdfTooLarge: boolean;
-  hasLog: boolean;
-  /** El log superó el máximo y se publicó solo su final. */
-  logTruncated: boolean;
+  /** Completo o, si superaba maxLogBytes, su final con un aviso. */
+  log: Buffer | null;
+  synctex: Buffer | null;
+  /** Log de biber o bibtex (solo para los diagnósticos). */
+  blg: Buffer | null;
 }
 
 export interface SweepResult {
@@ -34,16 +35,20 @@ export interface SweepResult {
 }
 
 export interface Workspace {
-  prepareInputs(id: string): Promise<WorkspacePaths>;
-  publishArtifacts(id: string): Promise<PublishResult>;
-  cleanupWork(id: string): Promise<void>;
+  /** Deja <id>/input y <id>/out vacíos (también en un reintento). */
+  prepare(id: string): Promise<WorkspacePaths>;
+  /** Escribe un archivo del proyecto en input/; la ruta se valida como cualquier ruta de proyecto. */
+  writeInput(id: string, path: string, data: Buffer): Promise<void>;
+  collectArtifacts(id: string): Promise<Artifacts>;
+  /** Borra <id> entero. */
+  cleanup(id: string): Promise<void>;
   sweepExpired(maxAgeMs: number, now?: number): Promise<SweepResult>;
 }
 
 export interface LocalWorkspaceOptions {
-  /** Raíz de almacenamiento (COMPILE_STORAGE_DIR): absoluta y apta para --mount. */
+  /** Raíz de trabajo (COMPILE_WORK_DIR): absoluta y apta para --mount. */
   root: string;
-  /** Un PDF más grande no se publica. */
+  /** Un PDF (o un synctex) más grande no se publica. */
   maxPdfBytes: number;
   /** Un log más grande se publica truncado a sus últimos `maxLogBytes`. */
   maxLogBytes: number;
@@ -60,6 +65,7 @@ export class WorkspaceError extends Error {
 
 const INPUT_DIR = 'input';
 const OUTPUT_DIR = 'out';
+const OUTPUTS = { pdf: 'output.pdf', log: 'output.log', synctex: 'output.synctex.gz', blg: 'output.blg' } as const;
 // O_NOFOLLOW no existe en Windows; ahí la defensa es el lstat previo.
 const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 
@@ -69,7 +75,7 @@ export function createLocalWorkspace(options: LocalWorkspaceOptions): Workspace 
   const chownDir = options.chownDir ?? chownDirNoFollow;
 
   if (!isSafeMountSource(root)) {
-    throw new WorkspaceError(`raíz de almacenamiento inválida (debe ser absoluta y sin , " ni caracteres de control): ${root}`);
+    throw new WorkspaceError(`raíz de trabajo inválida (debe ser absoluta y sin , " ni caracteres de control): ${root}`);
   }
   assertPositiveInteger(maxPdfBytes, 'maxPdfBytes');
   assertPositiveInteger(maxLogBytes, 'maxLogBytes');
@@ -80,52 +86,44 @@ export function createLocalWorkspace(options: LocalWorkspaceOptions): Workspace 
   };
 
   return {
-    async prepareInputs(id) {
+    async prepare(id) {
       const dir = jobDir(id);
+      await rm(dir, { recursive: true, force: true });
       const inputDir = join(dir, INPUT_DIR);
       const outputDir = join(dir, OUTPUT_DIR);
-
-      const input = await lstatOrNull(inputDir);
-      if (input === null || !input.isDirectory()) {
-        throw new WorkspaceError(`no existe el directorio de entrada de ${id}`);
-      }
-
-      // Si es un reintento (el worker se cayó a mitad), se descarta lo que haya quedado.
-      await rm(outputDir, { recursive: true, force: true });
-      await Promise.all(Object.values(ARTIFACT_FILES).map((file) => rm(join(dir, file), { force: true })));
+      await mkdir(inputDir, { recursive: true });
       await mkdir(outputDir);
-
       // Si el worker corre como root, el contenedor no (usa containerUser): /out tiene que ser suyo.
       if (getuid?.() === 0) await chownDir(outputDir, containerUser.uid, containerUser.gid);
-
       return { inputDir, outputDir };
     },
 
-    async publishArtifacts(id) {
-      const dir = jobDir(id);
-      const outputDir = join(dir, OUTPUT_DIR);
-
-      const pdfSource = join(outputDir, ARTIFACT_FILES.pdf);
-      const hasPdf = await publishIfSafe(pdfSource, join(dir, ARTIFACT_FILES.pdf), maxPdfBytes);
-      // Si no se publicó, distinguir "no hay PDF (o no es un archivo regular)" de "demasiado grande".
-      const pdfTooLarge = !hasPdf && ((await regularFileStats(pdfSource))?.size ?? 0) > maxPdfBytes;
-
-      const logSource = join(outputDir, ARTIFACT_FILES.log);
-      const logTarget = join(dir, ARTIFACT_FILES.log);
-      let hasLog = await publishIfSafe(logSource, logTarget, maxLogBytes);
-      let logTruncated = false;
-      if (!hasLog) {
-        logTruncated = await publishLogTail(logSource, logTarget, maxLogBytes);
-        hasLog = logTruncated;
-      }
-
-      return { hasPdf, pdfTooLarge, hasLog, logTruncated };
+    async writeInput(id, rawPath, data) {
+      const check = normalizeProjectPath(rawPath);
+      if (!check.ok) throw new WorkspaceError(`ruta de entrada inválida (${check.reason}): ${rawPath}`);
+      // latexmkrc se ejecutaría como Perl (aunque latexmk corre con -norc); los ocultos, por las dudas.
+      if (isIgnoredPath(check.path)) return;
+      const target = join(jobDir(id), INPUT_DIR, ...check.path.split('/'));
+      await mkdir(dirname(target), { recursive: true });
+      // wx: nunca sobrescribir (ni seguir un symlink que alguien haya dejado).
+      await writeFile(target, data, { flag: 'wx' });
     },
 
-    async cleanupWork(id) {
-      const dir = jobDir(id);
-      await rm(join(dir, INPUT_DIR), { recursive: true, force: true });
-      await rm(join(dir, OUTPUT_DIR), { recursive: true, force: true });
+    async collectArtifacts(id) {
+      const out = join(jobDir(id), OUTPUT_DIR);
+      const pdf = await readRegular(join(out, OUTPUTS.pdf), maxPdfBytes);
+      const synctex = await readRegular(join(out, OUTPUTS.synctex), maxPdfBytes);
+      return {
+        pdf: pdf.data,
+        pdfTooLarge: pdf.tooLarge,
+        log: await readLog(join(out, OUTPUTS.log), maxLogBytes),
+        synctex: synctex.data,
+        blg: await readLog(join(out, OUTPUTS.blg), maxLogBytes),
+      };
+    },
+
+    async cleanup(id) {
+      await rm(jobDir(id), { recursive: true, force: true });
     },
 
     async sweepExpired(maxAgeMs, now = Date.now()) {
@@ -146,7 +144,6 @@ export function createLocalWorkspace(options: LocalWorkspaceOptions): Workspace 
         const path = join(root, name);
         const stats = await lstatOrNull(path);
         if (stats === null || !stats.isDirectory()) continue;
-        // El mtime del directorio cambia al publicar y al limpiar: aproxima el fin de la compilación.
         if (now - stats.mtimeMs <= maxAgeMs) continue;
         try {
           await rm(path, { recursive: true, force: true });
@@ -161,71 +158,73 @@ export function createLocalWorkspace(options: LocalWorkspaceOptions): Workspace 
   };
 }
 
-/**
- * Publica `source` en `target` con un rename atómico si es un archivo regular (no symlink,
- * no directorio, etc.) de como máximo `maxBytes`. El contenido viene de la compilación del
- * usuario: no es confiable. Devuelve si se publicó.
- */
-async function publishIfSafe(source: string, target: string, maxBytes: number): Promise<boolean> {
-  const stats = await regularFileStats(source);
-  if (stats === null || stats.size > maxBytes) return false;
-  await rename(source, target);
-  return true;
+/** Lee un archivo regular de hasta `maxBytes` (sin seguir symlinks); si es más grande, tooLarge. */
+async function readRegular(path: string, maxBytes: number): Promise<{ data: Buffer | null; tooLarge: boolean }> {
+  const file = await openRegular(path);
+  if (!file) return { data: null, tooLarge: false };
+  try {
+    if (file.size > maxBytes) return { data: null, tooLarge: true };
+    return { data: await file.handle.readFile(), tooLarge: false };
+  } finally {
+    await file.handle.close();
+  }
 }
 
-/** Publica los últimos `maxBytes` del log con un aviso al principio. Devuelve si se publicó. */
-async function publishLogTail(source: string, target: string, maxBytes: number): Promise<boolean> {
-  const stats = await regularFileStats(source);
-  if (stats === null) return false;
-
-  const handle = await open(source, constants.O_RDONLY | O_NOFOLLOW);
-  let tail: Buffer;
+/** Lee un log; si supera `maxBytes`, solo su final con un aviso al principio. */
+async function readLog(path: string, maxBytes: number): Promise<Buffer | null> {
+  const file = await openRegular(path);
+  if (!file) return null;
   try {
-    tail = Buffer.alloc(maxBytes);
-    const { bytesRead } = await handle.read(tail, 0, maxBytes, Math.max(0, stats.size - maxBytes));
-    tail = tail.subarray(0, bytesRead);
+    if (file.size <= maxBytes) return await file.handle.readFile();
+    const tail = Buffer.alloc(maxBytes);
+    const { bytesRead } = await file.handle.read(tail, 0, maxBytes, file.size - maxBytes);
+    const notice = `[latexweb] El log original tenía ${file.size} bytes; se muestran los últimos ${bytesRead}.\n\n`;
+    return Buffer.concat([Buffer.from(notice, 'utf8'), tail.subarray(0, bytesRead)]);
   } finally {
+    await file.handle.close();
+  }
+}
+
+/** Abre un archivo regular sin seguir symlinks; null si no existe o es otra cosa (symlink, directorio, FIFO…). */
+async function openRegular(path: string) {
+  const before = await lstatOrNull(path);
+  if (before === null || !before.isFile()) return null;
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | O_NOFOLLOW);
+  } catch (error) {
+    if (isErrno(error, 'ELOOP') || isErrno(error, 'ENOENT')) return null;
+    throw error;
+  }
+  const stats = await handle.stat();
+  if (!stats.isFile()) {
     await handle.close();
+    return null;
   }
-
-  const notice = `[latexweb] El log original tenía ${stats.size} bytes; se muestran los últimos ${tail.length}.\n\n`;
-  const temporary = `${target}.tmp`;
-  // El worker puede correr como root y la carpeta es de otro usuario (el server en docker compose):
-  // nunca seguir un symlink que alguien haya dejado en la ruta del temporal. rm borra el enlace, no
-  // su destino, y O_CREAT|O_EXCL falla si la ruta vuelve a existir, sea lo que sea.
-  await rm(temporary, { force: true });
-  const out = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | O_NOFOLLOW, 0o644);
-  try {
-    await out.writeFile(Buffer.concat([Buffer.from(notice, 'utf8'), tail]));
-  } finally {
-    await out.close();
-  }
-  await rename(temporary, target);
-  return true;
+  return { handle, size: stats.size };
 }
 
 /**
- * Crea la raíz de almacenamiento si no existe (0700) y rechaza una raíz insegura. En Linux la raíz
- * por defecto está en /tmp, compartido entre usuarios: otro usuario podría crearla antes, o dejar
- * un symlink, y leer o redirigir todas las compilaciones. Dueño y modo solo se comprueban en POSIX.
+ * Crea la raíz de trabajo si no existe (0700) y rechaza una raíz insegura. En Linux la raíz por
+ * defecto está en /tmp, compartido entre usuarios: otro usuario podría crearla antes, o dejar un
+ * symlink, y leer o redirigir todas las compilaciones. Dueño y modo solo se comprueban en POSIX.
  */
-export async function prepareStorageRoot(
+export async function prepareWorkRoot(
   root: string,
   getuid: (() => number) | undefined = process.getuid,
 ): Promise<void> {
   await mkdir(root, { recursive: true, mode: 0o700 });
   const stats = await lstat(root);
   if (stats.isSymbolicLink() || !stats.isDirectory()) {
-    throw new WorkspaceError(`la raíz de almacenamiento no es un directorio real (¿symlink?): ${root}`);
+    throw new WorkspaceError(`la raíz de trabajo no es un directorio real (¿symlink?): ${root}`);
   }
   if (process.platform === 'win32' || getuid === undefined) return;
   const uid = getuid();
-  // root puede operar sobre la raíz de otro usuario (docker compose: el volumen es del server).
   if (uid !== 0 && stats.uid !== uid) {
-    throw new WorkspaceError(`la raíz de almacenamiento pertenece a otro usuario (uid ${stats.uid}): ${root}`);
+    throw new WorkspaceError(`la raíz de trabajo pertenece a otro usuario (uid ${stats.uid}): ${root}`);
   }
   if ((stats.mode & 0o022) !== 0) {
-    throw new WorkspaceError(`la raíz de almacenamiento es escribible por otros usuarios: ${root}`);
+    throw new WorkspaceError(`la raíz de trabajo es escribible por otros usuarios: ${root}`);
   }
 }
 
@@ -238,26 +237,6 @@ async function chownDirNoFollow(path: string, uid: number, gid: number): Promise
   const handle = await open(path, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | O_NOFOLLOW);
   try {
     await handle.chown(uid, gid);
-  } finally {
-    await handle.close();
-  }
-}
-
-/** Stats de un archivo regular, o null si no existe o es otra cosa (symlink, directorio, FIFO…). */
-async function regularFileStats(path: string): Promise<{ size: number } | null> {
-  const before = await lstatOrNull(path);
-  if (before === null || !before.isFile()) return null;
-  // Abrir sin seguir symlinks y volver a comprobar sobre el descriptor.
-  let handle;
-  try {
-    handle = await open(path, constants.O_RDONLY | O_NOFOLLOW);
-  } catch (error) {
-    if (isErrno(error, 'ELOOP') || isErrno(error, 'ENOENT')) return null;
-    throw error;
-  }
-  try {
-    const stats = await handle.stat();
-    return stats.isFile() ? { size: stats.size } : null;
   } finally {
     await handle.close();
   }

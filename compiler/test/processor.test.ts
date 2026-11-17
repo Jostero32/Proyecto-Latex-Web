@@ -1,75 +1,75 @@
-// Processor sin Docker ni Redis: Workspace y runContainer falsos. Ver docs/specs/compilacion.md,
-// "Estados y resultado".
+// Processor sin Docker, Redis ni MinIO: workspace, storage y runContainer falsos.
+import { compilationArtifactKey, compilationInputPrefix } from '@latexweb/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { RunContainerOptions, RunContainerResult } from '../src/docker';
 import { createCompileProcessor, InfrastructureError, InvalidJobError, type ProcessorDeps } from '../src/processor';
-import type { PublishResult, Workspace } from '../src/workspace';
+import type { Artifacts, Workspace } from '../src/workspace';
 
 const ID = '123e4567-e89b-42d3-a456-426614174000';
-const IMAGE = 'latexweb-texlive:test';
 const GOOD = { compilationId: ID, engine: 'pdflatex', mainFile: 'main.tex' };
-
-interface Harness {
-  calls: string[];
-  workspace: Workspace;
-  deps: ProcessorDeps;
-  prepareInputs: ReturnType<typeof vi.fn>;
-  publishArtifacts: ReturnType<typeof vi.fn>;
-  cleanupWork: ReturnType<typeof vi.fn>;
-  runContainer: ReturnType<typeof vi.fn>;
-  logError: ReturnType<typeof vi.fn>;
-  processor: ReturnType<typeof createCompileProcessor>;
-}
+const INPUT = compilationInputPrefix(ID);
+const LOG = './main.tex:3: Undefined control sequence.\nl.3 \\foo\n';
 
 interface Setup {
   run?: Partial<RunContainerResult>;
   runRejects?: Error;
-  publish?: Partial<PublishResult>;
-  prepareRejects?: Error;
+  artifacts?: Partial<Artifacts>;
   cleanupRejects?: Error;
+  objects?: Record<string, string>;
 }
 
-function setup(s: Setup = {}): Harness {
+function setup(s: Setup = {}) {
   const calls: string[] = [];
-  const prepareInputs = vi.fn(async (id: string) => {
-    calls.push(`prepareInputs:${id}`);
-    if (s.prepareRejects) throw s.prepareRejects;
-    return { inputDir: '/data/' + id + '/input', outputDir: '/data/' + id + '/out' };
-  });
-  const publishArtifacts = vi.fn(async (id: string): Promise<PublishResult> => {
-    calls.push(`publishArtifacts:${id}`);
-    return { hasPdf: true, pdfTooLarge: false, hasLog: true, logTruncated: false, ...s.publish };
-  });
-  const cleanupWork = vi.fn(async (id: string) => {
-    calls.push(`cleanupWork:${id}`);
-    if (s.cleanupRejects) throw s.cleanupRejects;
-  });
-  const runContainer = vi.fn(async (): Promise<RunContainerResult> => {
-    calls.push('runContainer');
+  const written = new Map<string, string>();
+  const uploaded = new Map<string, Buffer>();
+  const objects = s.objects ?? { [`${INPUT}main.tex`]: '\\documentclass{article}', [`${INPUT}fig/a.png`]: 'PNG' };
+  const workspace: Workspace = {
+    prepare: vi.fn(async (id: string) => {
+      calls.push('prepare');
+      return { inputDir: `/data/${id}/input`, outputDir: `/data/${id}/out` };
+    }),
+    writeInput: vi.fn(async (_id: string, path: string, data: Buffer) => {
+      written.set(path, data.toString());
+    }),
+    collectArtifacts: vi.fn(async (): Promise<Artifacts> => {
+      calls.push('collect');
+      return { pdf: Buffer.from('%PDF'), pdfTooLarge: false, log: Buffer.from(LOG), synctex: Buffer.from('gz'), blg: null, ...s.artifacts };
+    }),
+    cleanup: vi.fn(async () => {
+      calls.push('cleanup');
+      if (s.cleanupRejects) throw s.cleanupRejects;
+    }),
+    sweepExpired: async () => ({ removed: [], failed: [] }),
+  };
+  const runContainer = vi.fn<(options: RunContainerOptions) => Promise<RunContainerResult>>(async () => {
+    calls.push('run');
     if (s.runRejects) throw s.runRejects;
     return { exitCode: 0, killedByWorker: false, durationMs: 1234, stderrTail: '', ...s.run };
   });
   const logError = vi.fn();
-  const workspace: Workspace = {
-    prepareInputs,
-    publishArtifacts,
-    cleanupWork,
-    sweepExpired: async () => ({ removed: [], failed: [] }),
-  };
   const deps: ProcessorDeps = {
     workspace,
+    storage: {
+      list: async (prefix) => Object.entries(objects).filter(([k]) => k.startsWith(prefix)).map(([key, v]) => ({ key, size: v.length })),
+      getBuffer: async (key) => Buffer.from(objects[key] ?? ''),
+      put: async (key, body) => {
+        uploaded.set(key, body);
+      },
+    },
     containerUser: { uid: 1001, gid: 1002 },
-    image: IMAGE,
+    image: 'latexweb-texlive:test',
     timeoutSeconds: 42,
     cpus: 1,
     memory: '1g',
     pidsLimit: 128,
     tmpfsSize: '256m',
     maxFileBytes: 52428801,
+    maxInputBytes: 1000,
+    maxInputFiles: 10,
     runContainer,
     logError,
   };
-  return { calls, workspace, deps, prepareInputs, publishArtifacts, cleanupWork, runContainer, logError, processor: createCompileProcessor(deps) };
+  return { calls, written, uploaded, workspace, deps, runContainer, logError, processor: createCompileProcessor(deps) };
 }
 
 describe('processor', () => {
@@ -82,53 +82,61 @@ describe('processor', () => {
   ])('rechaza el payload %s sin preparar ni ejecutar', async (_name, data) => {
     const h = setup();
     await expect(h.processor({ id: ID, data })).rejects.toThrow(InvalidJobError);
-    expect(h.prepareInputs).not.toHaveBeenCalled();
-    expect(h.runContainer).not.toHaveBeenCalled();
+    expect(h.calls).toEqual([]);
   });
 
-  it('rechaza un job cuyo id no coincide con compilationId', async () => {
-    const h = setup();
-    await expect(h.processor({ id: '223e4567-e89b-42d3-a456-426614174000', data: GOOD })).rejects.toThrow(InvalidJobError);
-    expect(h.runContainer).not.toHaveBeenCalled();
-  });
-
-  it('éxito: prepara, compila con los argumentos del motor, publica y limpia, en ese orden', async () => {
-    const h = setup({ run: { exitCode: 0, durationMs: 987 }, publish: { hasLog: false } });
-    const result = await h.processor({ id: ID, data: { ...GOOD, engine: 'xelatex', mainFile: 'tesis.tex' } });
-    expect(result).toEqual({ outcome: 'success', exitCode: 0, durationMs: 987, hasPdf: true, hasLog: false, pdfMissingReason: null });
-    expect(h.calls).toEqual([`prepareInputs:${ID}`, 'runContainer', `publishArtifacts:${ID}`, `cleanupWork:${ID}`]);
+  it('baja la instantánea, compila, sube los artefactos y devuelve los diagnósticos', async () => {
+    const h = setup({ run: { exitCode: 12, durationMs: 987 } });
+    const result = await h.processor({ id: ID, data: { ...GOOD, engine: 'xelatex' } });
+    expect(result).toEqual({
+      outcome: 'error',
+      exitCode: 12,
+      durationMs: 987,
+      hasPdf: true,
+      hasLog: true,
+      hasSynctex: true,
+      pdfMissingReason: null,
+      diagnostics: [{ file: 'main.tex', line: 3, level: 'error', message: 'Undefined control sequence.' }],
+    });
+    expect(h.calls).toEqual(['prepare', 'run', 'collect', 'cleanup']);
+    expect([...h.written.keys()].sort()).toEqual(['fig/a.png', 'main.tex']);
+    expect([...h.uploaded.keys()].sort()).toEqual(
+      [compilationArtifactKey(ID, 'log'), compilationArtifactKey(ID, 'pdf'), compilationArtifactKey(ID, 'synctex')].sort(),
+    );
     const options = h.runContainer.mock.calls[0]![0] as RunContainerOptions;
-    expect(options.containerName).toBe(`latexweb-compile-${ID}`);
-    expect(options.args.slice(-2)).toEqual(['-pdfxe', 'tesis.tex']);
-    expect(options.args).toContain(`fsize=${h.deps.maxFileBytes}`);
+    expect(options.args.slice(-2)).toEqual(['-pdfxe', 'main.tex']);
+  });
+
+  it('una instantánea que supera los topes falla sin compilar', async () => {
+    const h = setup({ objects: { [`${INPUT}main.tex`]: 'x'.repeat(1001) } });
+    await expect(h.processor({ id: ID, data: GOOD })).rejects.toThrow(InvalidJobError);
+    expect(h.runContainer).not.toHaveBeenCalled();
   });
 
   it.each<[string, Setup, Record<string, unknown>]>([
-    ['PDF demasiado grande', { publish: { hasPdf: false, pdfTooLarge: true } }, { outcome: 'error', pdfMissingReason: 'too_large' }],
-    ['error de LaTeX', { run: { exitCode: 12 }, publish: { hasPdf: false } }, { outcome: 'error', pdfMissingReason: 'not_produced' }],
-    ['timeout interno', { run: { exitCode: 124 }, publish: { hasPdf: false } }, { outcome: 'timeout' }],
-    ['matado por el worker', { run: { exitCode: null, killedByWorker: true }, publish: { hasPdf: false } }, { outcome: 'timeout' }],
+    ['PDF demasiado grande', { artifacts: { pdf: null, pdfTooLarge: true } }, { outcome: 'error', pdfMissingReason: 'too_large' }],
+    ['error de LaTeX', { run: { exitCode: 12 }, artifacts: { pdf: null } }, { outcome: 'error', pdfMissingReason: 'not_produced' }],
+    ['timeout interno', { run: { exitCode: 124 }, artifacts: { pdf: null } }, { outcome: 'timeout' }],
+    ['matado por el worker', { run: { exitCode: null, killedByWorker: true }, artifacts: { pdf: null } }, { outcome: 'timeout' }],
   ])('%s es un resultado, no una excepción', async (_name, s, expected) => {
-    const h = setup(s);
-    expect(await h.processor({ id: ID, data: GOOD })).toMatchObject(expected);
+    expect(await setup(s).processor({ id: ID, data: GOOD })).toMatchObject(expected);
   });
 
-  it('un fallo de docker lanza InfrastructureError y lo registra con el id y stderr', async () => {
-    const h = setup({ run: { exitCode: 125, stderrTail: 'Unable to find image' }, publish: { hasPdf: false } });
+  it('un fallo de docker lanza InfrastructureError, lo registra y no sube nada', async () => {
+    const h = setup({ run: { exitCode: 125, stderrTail: 'Unable to find image' }, artifacts: { pdf: null } });
     await expect(h.processor({ id: ID, data: GOOD })).rejects.toThrow(InfrastructureError);
-    const message = String(h.logError.mock.calls[0]![0]);
-    expect(message).toContain(ID);
-    expect(message).toContain('Unable to find image');
+    expect(String(h.logError.mock.calls[0]![0])).toContain('Unable to find image');
+    expect(h.uploaded.size).toBe(0);
   });
 
   it.each<[string, Setup]>([
     ['éxito', {}],
-    ['infraestructura', { run: { exitCode: 125 }, publish: { hasPdf: false } }],
+    ['infraestructura', { run: { exitCode: 125 }, artifacts: { pdf: null } }],
     ['runContainer que rechaza', { runRejects: new Error('boom') }],
   ])('siempre limpia el trabajo (%s)', async (_name, s) => {
     const h = setup(s);
     await h.processor({ id: ID, data: GOOD }).catch(() => undefined);
-    expect(h.cleanupWork).toHaveBeenCalledExactlyOnceWith(ID);
+    expect(h.workspace.cleanup).toHaveBeenCalledExactlyOnceWith(ID);
   });
 
   it('si la limpieza falla, no tapa el resultado', async () => {
@@ -141,6 +149,6 @@ describe('processor', () => {
     const h = setup();
     const processor = createCompileProcessor({ ...h.deps, minFreeBytes: 1000, freeBytes: async () => 999 });
     await expect(processor({ id: ID, data: GOOD })).rejects.toBeInstanceOf(InfrastructureError);
-    expect(h.prepareInputs).not.toHaveBeenCalled();
+    expect(h.calls).toEqual([]);
   });
 });

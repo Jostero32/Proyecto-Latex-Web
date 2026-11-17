@@ -3,6 +3,7 @@ import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from
 import rateLimit, { normalizeIP } from '@fastify/rate-limit';
 import type { Redis } from 'ioredis';
 import { sendError } from '../../http';
+import { errors, wrap } from '../../openapi';
 import { createRequireUser, SESSION_COOKIE } from './guard';
 import { AuthError, type AuthService, type SessionResult } from './service';
 
@@ -14,6 +15,16 @@ export interface AuthDeps {
 }
 
 const RATE_LIMIT = { max: 10, timeWindow: 15 * 60 * 1000 };
+
+const credentials = (withName: boolean) => ({
+  type: 'object',
+  properties: {
+    email: { type: 'string', examples: ['ana@ejemplo.com'] },
+    password: { type: 'string', description: 'Al registrarse, al menos 10 caracteres' },
+    ...(withName ? { name: { type: 'string' } } : {}),
+  },
+});
+const noSession = { security: [] as never[] };
 const AUTH_BODY_LIMIT = 4096;
 
 const ERROR_STATUS: Record<AuthError['code'], number> = {
@@ -84,26 +95,34 @@ export async function authRoutes(app: FastifyInstance, deps: AuthDeps): Promise<
   };
 
   // bodyLimit: un email y una contraseña de hasta 256 caracteres entran de sobra en 4 KB.
-  app.post('/auth/register', { preHandler: limitAuth, bodyLimit: AUTH_BODY_LIMIT }, async (request, reply) => {
+  app.post('/auth/register', {
+    preHandler: limitAuth,
+    bodyLimit: AUTH_BODY_LIMIT,
+    schema: { tags: ['auth'], summary: 'Crear una cuenta e iniciar sesión', ...noSession, body: credentials(true), response: { 201: wrap('user', 'User'), ...errors } },
+  }, async (request, reply) => {
     const body = objectBody(request);
     await dropCurrentSession(request);
     const session = await service.register({ email: body.email, password: body.password, name: body.name });
     return setSession(reply, session).code(201).send({ user: session.user });
   });
 
-  app.post('/auth/login', { preHandler: limitAuth, bodyLimit: AUTH_BODY_LIMIT }, async (request, reply) => {
+  app.post('/auth/login', {
+    preHandler: limitAuth,
+    bodyLimit: AUTH_BODY_LIMIT,
+    schema: { tags: ['auth'], summary: 'Iniciar sesión (deja la cookie sid)', ...noSession, body: credentials(false), response: { 200: wrap('user', 'User'), ...errors } },
+  }, async (request, reply) => {
     const body = objectBody(request);
     await dropCurrentSession(request);
     const session = await service.login({ email: body.email, password: body.password });
     return setSession(reply, session).send({ user: session.user });
   });
 
-  app.post('/auth/logout', async (request, reply) => {
+  app.post('/auth/logout', { schema: { tags: ['auth'], summary: 'Cerrar la sesión', response: { 204: { type: 'null', description: 'Sin contenido' } } } }, async (request, reply) => {
     await dropCurrentSession(request);
     return reply.clearCookie(SESSION_COOKIE, { path: '/' }).code(204).send();
   });
 
-  app.get('/auth/me', { preHandler: requireUser }, async (request) => ({ user: request.user }));
+  app.get('/auth/me', { preHandler: requireUser, schema: { tags: ['auth'], summary: 'Usuario de la sesión', response: { 200: wrap('user', 'User'), ...errors } } }, async (request) => ({ user: request.user }));
 }
 
 function objectBody(request: FastifyRequest): Record<string, unknown> {

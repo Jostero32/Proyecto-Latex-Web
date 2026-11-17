@@ -14,6 +14,9 @@ momento (CLAUDE.md, "Forma de trabajo"). Ordenado por prioridad dentro de cada s
 | baja | auth | `web` comparte la red `default` con `postgres`, y `server` usa el mismo usuario de base (con DDL) que `migrate`: red propia para postgres y un rol solo DML para el server. |
 | baja | compilación | biber usa 49 de sus 83 bibliotecas nativas precalentadas; una función rara que necesite otra falla con "Read-only file system". |
 | media | proyectos | **Subidas en memoria:** `POST /files` y la importación de zip leen todo en memoria (hasta `PROJECT_MAX_BYTES` por petición). Con varias a la vez el server puede quedarse sin RAM: limitar las subidas concurrentes o pasar a archivos temporales. |
+| media | compilación | **Sin límite de compilaciones por usuario:** solo hay un tope global de la cola (`COMPILE_MAX_QUEUED`); un usuario puede llenarla. Rate limit por usuario (cuotas, spec `cierre`). |
+| baja | compilación | El worker usa las credenciales raíz de MinIO: un usuario propio con permiso solo sobre `compilations/`. |
+| baja | api | Swagger UI "Try it out" con POST desde `localhost:3000` responde 403: ese origen no está en `ALLOWED_ORIGINS` (a propósito). Con el proxy de Vite (frontend) la UI queda en el mismo origen que la web. |
 | baja | colaboración | **Cerrar sesión no corta los WebSockets abiertos** de esa sesión: siguen hasta que se cierran solos. Cerrarlos en logout (por usuario, como al quitar permisos). |
 | baja | colaboración | El tope de documento estima el tamaño sumando todos los mensajes, también los de presencia (awareness): cerca del tope recalcula el tamaño exacto más seguido de lo necesario. |
 | baja | proyectos | **Topes con carreras:** dos subidas simultáneas al mismo proyecto pueden pasar juntas el tope de bytes o de archivos (se calcula antes de escribir, sin bloqueo). |

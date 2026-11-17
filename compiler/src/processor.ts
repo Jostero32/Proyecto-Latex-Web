@@ -1,9 +1,13 @@
-// Processor de la cola `compile`. Ver docs/specs/compilacion.md, "Estados y resultado".
+// Processor de la cola `compile`: baja la instantánea del proyecto de MinIO, compila en Docker (sin
+// red, sin shell-escape, con límites), sube los artefactos y devuelve el resultado con los
+// diagnósticos del log.
 //
 // Un error de LaTeX (o un timeout) es un RESULTADO: el job termina en `completed` con su outcome.
 // Solo se lanza una excepción ante fallos de infraestructura o un payload inválido, y el job queda
 // en `failed`; el detalle va al log del worker, nunca a la API.
 import {
+  compilationArtifactKey,
+  compilationInputPrefix,
   isCompilationId,
   isEngine,
   isValidMainFile,
@@ -20,10 +24,13 @@ import {
   type RunContainerOptions,
   type RunContainerResult,
 } from './docker';
+import { finish, parseBlg, parseLatexLog } from './log';
+import type { Storage } from './storage';
 import type { Workspace } from './workspace';
 
 export interface ProcessorDeps {
   workspace: Workspace;
+  storage: Pick<Storage, 'list' | 'getBuffer' | 'put'>;
   containerUser: Readonly<ContainerUser>;
   image: string;
   timeoutSeconds: number;
@@ -33,11 +40,14 @@ export interface ProcessorDeps {
   tmpfsSize: string;
   /** Tope por archivo de la compilación (--ulimit fsize). */
   maxFileBytes: number;
-  /** Modo volumen (docker compose): volumen con nombre que contiene la raíz de almacenamiento. */
-  storageVolume?: string | undefined;
+  /** Topes de la instantánea que se baja (el server ya los aplica; aquí es defensa en profundidad). */
+  maxInputBytes: number;
+  maxInputFiles: number;
+  /** Modo volumen (docker compose): volumen con nombre que contiene la raíz de trabajo. */
+  workVolume?: string | undefined;
   /** Si hay menos espacio libre, el job falla sin compilar. Sin esto no se comprueba. */
   minFreeBytes?: number | undefined;
-  /** Bytes libres en la raíz de almacenamiento (por defecto no se consulta). */
+  /** Bytes libres en la raíz de trabajo (por defecto no se consulta). */
   freeBytes?: () => Promise<number>;
   /** Inyectable para tests. */
   runContainer?: (options: RunContainerOptions) => Promise<RunContainerResult>;
@@ -63,6 +73,18 @@ export function createCompileProcessor(deps: ProcessorDeps): (job: CompileJob) =
   const run = deps.runContainer ?? defaultRunContainer;
   const logError = deps.logError ?? ((message: string) => console.error(message));
 
+  async function download(id: string): Promise<void> {
+    const prefix = compilationInputPrefix(id);
+    const objects = await deps.storage.list(prefix);
+    const total = objects.reduce((sum, o) => sum + o.size, 0);
+    if (objects.length > deps.maxInputFiles || total > deps.maxInputBytes) {
+      throw new InvalidJobError(`la instantánea supera los topes (${objects.length} archivos, ${total} bytes)`);
+    }
+    for (const object of objects) {
+      await deps.workspace.writeInput(id, object.key.slice(prefix.length), await deps.storage.getBuffer(object.key));
+    }
+  }
+
   return async (job) => {
     // El worker vuelve a validar todo: no confía en lo que haya en Redis.
     const data = parseJobData(job.data);
@@ -71,17 +93,18 @@ export function createCompileProcessor(deps: ProcessorDeps): (job: CompileJob) =
     }
     const { compilationId: id, engine, mainFile } = data;
 
-    // Piso de espacio libre: no compilar (y no publicar hasta ~55 MB más) con el disco casi lleno.
+    // Piso de espacio libre: no compilar con el disco casi lleno.
     if (deps.minFreeBytes !== undefined && deps.freeBytes !== undefined) {
       const free = await deps.freeBytes();
       if (free < deps.minFreeBytes) {
         logError(`[compiler] ${id}: espacio libre insuficiente (${free} < ${deps.minFreeBytes} bytes)`);
-        throw new InfrastructureError('espacio libre insuficiente en el almacenamiento');
+        throw new InfrastructureError('espacio libre insuficiente en el disco de trabajo');
       }
     }
 
-    const paths = await deps.workspace.prepareInputs(id);
     try {
+      const paths = await deps.workspace.prepare(id);
+      await download(id);
       const runResult = await run({
         containerName: containerName(id),
         timeoutSeconds: deps.timeoutSeconds,
@@ -98,20 +121,24 @@ export function createCompileProcessor(deps: ProcessorDeps): (job: CompileJob) =
           tmpfsSize: deps.tmpfsSize,
           maxFileBytes: deps.maxFileBytes,
           user: deps.containerUser,
-          storageVolume: deps.storageVolume,
+          storageVolume: deps.workVolume,
         }),
       });
 
-      const published = await deps.workspace.publishArtifacts(id);
-      const classification = classifyRun(runResult, published.hasPdf);
+      const artifacts = await deps.workspace.collectArtifacts(id);
+      const classification = classifyRun(runResult, artifacts.pdf !== null);
       if (classification.kind === 'infrastructure') {
         logError(`[compiler] ${id}: ${classification.reason}\n${runResult.stderrTail}`);
         throw new InfrastructureError(classification.reason);
       }
 
-      const pdfMissingReason: PdfMissingReason | null = published.hasPdf
+      if (artifacts.pdf) await deps.storage.put(compilationArtifactKey(id, 'pdf'), artifacts.pdf, 'application/pdf');
+      if (artifacts.log) await deps.storage.put(compilationArtifactKey(id, 'log'), artifacts.log, 'text/plain; charset=utf-8');
+      if (artifacts.synctex) await deps.storage.put(compilationArtifactKey(id, 'synctex'), artifacts.synctex, 'application/gzip');
+
+      const pdfMissingReason: PdfMissingReason | null = artifacts.pdf
         ? null
-        : published.pdfTooLarge
+        : artifacts.pdfTooLarge
           ? 'too_large'
           : 'not_produced';
 
@@ -119,13 +146,18 @@ export function createCompileProcessor(deps: ProcessorDeps): (job: CompileJob) =
         outcome: classification.outcome,
         exitCode: runResult.exitCode,
         durationMs: runResult.durationMs,
-        hasPdf: published.hasPdf,
-        hasLog: published.hasLog,
+        hasPdf: artifacts.pdf !== null,
+        hasLog: artifacts.log !== null,
+        hasSynctex: artifacts.synctex !== null,
         pdfMissingReason,
+        diagnostics: finish([
+          ...parseLatexLog(artifacts.log?.toString('utf8') ?? ''),
+          ...parseBlg(artifacts.blg?.toString('utf8') ?? ''),
+        ]),
       };
     } finally {
-      // input/ y out/ ya no hacen falta, salió bien o mal: solo quedan los artefactos publicados.
-      await deps.workspace.cleanupWork(id).catch((error: unknown) => {
+      // Salió bien o mal, del trabajo local no queda nada: los artefactos ya están en MinIO.
+      await deps.workspace.cleanup(id).catch((error: unknown) => {
         logError(`[compiler] ${id}: no se pudo limpiar el directorio de trabajo: ${String(error)}`);
       });
     }

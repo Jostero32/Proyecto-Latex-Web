@@ -6,7 +6,7 @@ Objetivo: un clon de Overleaf usable. Pocas specs, cada una con 3 o 4 pasos gran
 | # | Spec | Qué queda andando | Estado |
 |---|---|---|---|
 | — | compilación, auth | compilar por API, registrarse e iniciar sesión por API | hecho |
-| 1 | `backend.md` (4 pasos) | reestructura y Drizzle; proyectos, archivos, imágenes y permisos; colaboración persistida; compilación de proyectos con errores y SyncTeX | pasos 1 a 3 hechos |
+| 1 | `backend.md` (4 pasos) | reestructura y Drizzle; proyectos, archivos, imágenes y permisos; colaboración persistida; compilación de proyectos con errores y SyncTeX | hecho |
 | 2 | `frontend.md` | login, lista de proyectos, editor con árbol de archivos e imágenes, colaboración en vivo con cursores, compilar, visor PDF, panel de errores, SyncTeX | pendiente |
 | 3 | `editor-visual.md` | modo visual sobre el mismo documento, barra de formato, insertar figuras y fórmulas | pendiente |
 | 4 | `cierre.md` | historial de versiones, cuotas, despliegue | pendiente |
@@ -30,7 +30,7 @@ Pendientes menores y hallazgos de seguridad: `docs/backlog.md`.
 - **Dónde vive cada cosa:** el árbol de archivos en Postgres; el texto en un `Y.Doc` por proyecto (persistido
   en Postgres), que es lo que se edita en vivo y lo que se compila; los binarios en MinIO.
 - **Un solo origen para el navegador:** la API bajo `/api`, y Vite como proxy de `/api` y `/collab` (spec
-  del frontend).
+  del frontend). La API está documentada en `/api/docs` (Swagger).
 - **Editor visual = decoraciones de CodeMirror 6** sobre el mismo `Y.Text`, como el Visual Editor de
   Overleaf. No usar un editor WYSIWYG aparte con conversión LaTeX ↔ HTML: pierde información y rompe la
   colaboración.

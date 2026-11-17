@@ -1,5 +1,5 @@
 // Construcción del servidor (API REST + colaboración), separada del arranque para poder testearla.
-// La API vive bajo /api; la colaboración, en el WebSocket /collab.
+// La API vive bajo /api (documentada en /api/docs); la colaboración, en el WebSocket /collab.
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
@@ -8,7 +8,9 @@ import { createRequireUser, registerAuthHooks } from './features/auth/guard';
 import { authRoutes, type AuthDeps } from './features/auth/routes';
 import { createProjectDocs } from './features/collab/documents';
 import { attachCollab, createCollab } from './features/collab/websocket';
-import { compilationsRoutes, type CompilationsDeps } from './features/compilations/routes';
+import type { CompileQueue } from './features/compile/queue';
+import { compileRoutes } from './features/compile/routes';
+import { createCompileService, type CompileConfig } from './features/compile/service';
 import { filesRoutes } from './features/files/routes';
 import { createFilesService, type ProjectLimits } from './features/files/service';
 import { projectsRoutes } from './features/projects/routes';
@@ -22,22 +24,31 @@ import {
   registerRequestGuard,
   type RequestGuardOptions,
 } from './http';
+import { registerOpenApi } from './openapi';
 import type { Storage } from './storage';
 
 export const API_PREFIX = '/api';
 
-export interface AppDeps {
-  /** Sin esto no se registran las rutas de auth (p. ej. en los tests de collab). */
-  auth?: AuthDeps;
-  /** Proyectos, archivos y compartir (requiere `auth`). */
-  projects?: { db: Db; storage: Storage; limits: ProjectLimits };
-  /** Sin esto no se registran las rutas de compilación. */
-  compilations?: CompilationsDeps;
-  /** Host y Origin permitidos; por defecto, localhost y el frontend de desarrollo. */
-  security?: RequestGuardOptions;
+export interface ProjectsAppDeps {
+  db: Db;
+  storage: Storage;
+  limits: ProjectLimits;
+  queue: CompileQueue;
+  compile: CompileConfig;
 }
 
-/** Campos de texto del multipart además de los archivos (p. ej. mainFile, engine o name). */
+export interface AppDeps {
+  /** Sin esto no se registran las rutas de auth (p. ej. en los tests del upgrade de collab). */
+  auth?: AuthDeps;
+  /** Proyectos, archivos, compartir y compilar (requiere `auth`). */
+  projects?: ProjectsAppDeps;
+  /** Host y Origin permitidos; por defecto, localhost y el frontend de desarrollo. */
+  security?: RequestGuardOptions;
+  /** Swagger UI en /api/docs (por defecto, sí). */
+  docs?: boolean;
+}
+
+/** Campos de texto del multipart además de los archivos (p. ej. el nombre al importar). */
 const MAX_MULTIPART_FIELDS = 10;
 /** Largo máximo de un campo de texto: rutas de hasta 255 caracteres con margen. */
 const MAX_MULTIPART_FIELD_BYTES = 1024;
@@ -51,6 +62,7 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
   registerRequestGuard(app, security);
   // Sin firma: la cookie de sesión es un token aleatorio de 32 bytes que solo vale si existe en la base.
   await app.register(cookie);
+  await registerOpenApi(app, deps.docs ?? true);
   const hocuspocus = deps.projects
     ? createCollab({ db: deps.projects.db, docMaxBytes: deps.projects.limits.docMaxBytes })
     : createCollab({ docMaxBytes: DEFAULT_DOC_MAX_BYTES });
@@ -58,7 +70,7 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
 
   await app.register(
     async (api) => {
-      api.get('/health', async () => ({ ok: true }));
+      api.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
 
       if (deps.auth) {
         const auth = deps.auth;
@@ -69,12 +81,13 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
 
       if (deps.projects) {
         if (!deps.auth) throw new Error('las rutas de proyectos necesitan auth');
-        const { db, storage, limits } = deps.projects;
+        const { db, storage, limits, queue } = deps.projects;
         const docs = createProjectDocs(hocuspocus, db);
         const requireUser = createRequireUser(deps.auth.service);
         const projects = createProjectsService({ db, storage, docs, limits });
         const files = createFilesService({ db, storage, docs, limits });
         const sharing = createSharingService(db, docs);
+        const compile = createCompileService({ db, storage, docs, queue, config: deps.projects.compile });
         await api.register(async (scope) => {
           registerApiErrorHandler(scope);
           // Datos privados de cada usuario: nunca en una caché compartida.
@@ -97,25 +110,7 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
           await projectsRoutes(scope, { db, projects, limits });
           await filesRoutes(scope, { db, files, limits });
           await sharingRoutes(scope, { db, sharing });
-        });
-      }
-
-      if (deps.compilations) {
-        const compilations = deps.compilations;
-        const limits = compilations.config.upload;
-        await api.register(async (scope) => {
-          await scope.register(multipart, {
-            preservePath: true,
-            limits: {
-              fileSize: limits.maxFileBytes,
-              files: limits.maxFiles,
-              fields: MAX_MULTIPART_FIELDS,
-              fieldSize: MAX_MULTIPART_FIELD_BYTES,
-              parts: limits.maxFiles + MAX_MULTIPART_FIELDS,
-              headerPairs: 100,
-            },
-          });
-          await compilationsRoutes(scope, compilations);
+          await compileRoutes(scope, { db, compile });
         });
       }
     },

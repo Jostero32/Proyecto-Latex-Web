@@ -69,6 +69,7 @@ services:
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
+    networks: [default, storage-compiler]
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
@@ -100,7 +101,6 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-latexweb}:${POSTGRES_PASSWORD:-latexweb}@postgres:5432/${POSTGRES_DB:-latexweb}
       # Solo http://localhost: en producción (HTTPS) tiene que ser true.
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      COMPILE_STORAGE_DIR: /data/compilations
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: ${MINIO_ROOT_USER:-latexweb}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-latexweb-dev-secret}
@@ -110,18 +110,11 @@ services:
       # Opcionales: si no se definen en .env, se usan los valores por defecto del código.
       COMPILE_TTL_SECONDS:
       COMPILE_MAX_QUEUED:
-      COMPILE_MAX_PDF_BYTES:
-      COMPILE_MAX_UPLOAD_FILE_BYTES:
-      COMPILE_MAX_UPLOAD_TOTAL_BYTES:
-      COMPILE_MAX_UPLOAD_FILES:
-      COMPILE_MAX_CONCURRENT_UPLOADS:
-      COMPILE_MIN_FREE_BYTES:
+      API_DOCS:
       PROJECT_MAX_BYTES:
       PROJECT_MAX_FILES:
       FILE_MAX_BYTES:
       DOC_MAX_BYTES:
-    volumes:
-      - compile-storage:/data/compilations
     ports:
       - "127.0.0.1:${SERVER_PORT:-3000}:3000"
     networks: [default, queue-server]
@@ -140,7 +133,7 @@ services:
       target: compiler
     image: latexweb-compiler:dev
     # Root dentro del contenedor (por el socket), pero solo con las capacidades que usa: crear y
-    # entregar al uid de las compilaciones las carpetas de salida en el volumen del server.
+    # entregar al uid de las compilaciones las carpetas de salida en su volumen de trabajo.
     cap_add:
       - CHOWN
       - DAC_OVERRIDE
@@ -149,9 +142,13 @@ services:
       - /tmp:rw,nosuid,nodev,noexec,size=64m
     environment:
       REDIS_URL: redis://redis:6379
-      COMPILE_STORAGE_DIR: /data/compilations
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-latexweb}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-latexweb-dev-secret}
+      S3_BUCKET: ${S3_BUCKET:-latexweb}
+      COMPILE_WORK_DIR: /data/work
       # Las compilaciones montan su subcarpeta de este volumen (volume-subpath).
-      COMPILE_STORAGE_VOLUME: latexweb-compile-storage
+      COMPILE_WORK_VOLUME: latexweb-compile-work
       COMPILE_IMAGE: latexweb-texlive:tl2026-2
       # La CLI de docker escribe su configuración en $DOCKER_CONFIG; la raíz es de solo lectura.
       DOCKER_CONFIG: /tmp/.docker
@@ -161,17 +158,21 @@ services:
       COMPILE_PIDS_LIMIT:
       COMPILE_TMPFS_SIZE:
       COMPILE_CONCURRENCY:
-      COMPILE_TTL_SECONDS:
       COMPILE_MAX_PDF_BYTES:
       COMPILE_MAX_LOG_BYTES:
       COMPILE_MIN_FREE_BYTES:
+      PROJECT_MAX_BYTES:
+      PROJECT_MAX_FILES:
     volumes:
-      - compile-storage:/data/compilations
+      - compile-work:/data/work
       - /var/run/docker.sock:/var/run/docker.sock
-    # Solo Redis: el worker no necesita (ni alcanza) postgres, minio ni el server.
-    networks: [queue-compiler]
+    # Redis (la cola) y MinIO (entradas y resultados); no alcanza a postgres ni al server. Las
+    # compilaciones en sí corren sin red.
+    networks: [queue-compiler, storage-compiler]
     depends_on:
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
       texlive-image:
         condition: service_completed_successfully
@@ -198,11 +199,14 @@ networks:
     internal: true
   queue-compiler:
     internal: true
+  # MinIO para el worker, sin salida a internet.
+  storage-compiler:
+    internal: true
 
 volumes:
   postgres-data:
   redis-data:
   minio-data:
   # Nombre fijo: las compilaciones (contenedores hermanos lanzados por compiler) lo montan por nombre.
-  compile-storage:
-    name: latexweb-compile-storage
+  compile-work:
+    name: latexweb-compile-work

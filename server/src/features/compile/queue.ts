@@ -1,6 +1,5 @@
-// Acceso a la cola `compile` desde la API: encolar y consultar el estado. La fuente de verdad del
-// estado es el job de BullMQ (no hay base de datos en v1). Interfaz chica para poder usar una cola
-// falsa en los tests.
+// Acceso a la cola `compile` desde la API: encolar y consultar el estado. El estado y el resultado
+// de una compilación son los del job de BullMQ. Interfaz chica para poder usar una cola falsa en los tests.
 import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { COMPILE_QUEUE, type CompileJobData, type CompileJobResult } from '@latexweb/shared';

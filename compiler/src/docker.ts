@@ -18,7 +18,7 @@ export const ENGINE_FLAGS = {
  * Nunca --env-file ni `--env NOMBRE` sin valor: reenviarían el entorno del worker, y TeX
  * puede leer /proc/self/environ (desde TL2026 openin_any no tiene efecto).
  */
-export const CONTAINER_ENV_NAMES = ['openout_any', 'shell_escape', 'HOME', 'LATEXWEB_TIMEOUT'] as const;
+export const CONTAINER_ENV_NAMES = ['openout_any', 'shell_escape', 'max_print_line', 'HOME', 'LATEXWEB_TIMEOUT'] as const;
 
 /** Usuario del contenedor cuando no se puede usar el del worker (Windows, macOS sin getuid, o root). */
 // uid sin cuenta en el host: 1000 suele ser el primer usuario humano de un Linux, y un escape o un
@@ -105,6 +105,8 @@ export function buildDockerRunArgs(options: DockerRunOptions): string[] {
   const env: Record<(typeof CONTAINER_ENV_NAMES)[number], string> = {
     openout_any: 'p',
     shell_escape: 'f',
+    // Líneas del log sin cortar: las rutas de los archivos quedan enteras para los diagnósticos.
+    max_print_line: '10000',
     HOME: '/tmp',
     LATEXWEB_TIMEOUT: String(options.timeoutSeconds),
   };
@@ -142,6 +144,7 @@ export function buildDockerRunArgs(options: DockerRunOptions): string[] {
     '-no-shell-escape',
     '-interaction=nonstopmode',
     '-file-line-error',
+    '-synctex=1',
     '-jobname=output',
     ENGINE_FLAGS[engine],
     mainFile,

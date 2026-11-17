@@ -3,25 +3,22 @@
 // una compilación.
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  DEFAULT_STORAGE_DIRNAME,
-  envPositiveInteger,
-  envPositiveNumber,
-  envSize,
-  type Env,
-} from '@latexweb/shared';
+import { envPositiveInteger, envPositiveNumber, envSize, type Env } from '@latexweb/shared';
+import type { StorageConfig } from './storage';
 
 export { ConfigError } from '@latexweb/shared';
 
 export interface CompilerConfig {
   redisUrl: string;
-  /** Raíz compartida con la API (COMPILE_STORAGE_DIR). */
-  storageDir: string;
+  /** MinIO: de ahí se baja la instantánea del proyecto y ahí se suben los artefactos. */
+  storage: StorageConfig;
+  /** Disco de trabajo propio del worker (COMPILE_WORK_DIR); por defecto, en el directorio temporal. */
+  workDir: string;
   /**
-   * COMPILE_STORAGE_VOLUME: si está definida, el worker corre en un contenedor (docker compose) y
-   * storageDir es el punto de montaje de este volumen; las compilaciones lo montan con subpath.
+   * COMPILE_WORK_VOLUME: si está definida, el worker corre en un contenedor (docker compose) y
+   * workDir es el punto de montaje de este volumen; las compilaciones lo montan con subpath.
    */
-  storageVolume: string | undefined;
+  workVolume: string | undefined;
   image: string;
   timeoutSeconds: number;
   cpus: number;
@@ -29,11 +26,13 @@ export interface CompilerConfig {
   pidsLimit: number;
   tmpfsSize: string;
   concurrency: number;
-  ttlSeconds: number;
   sweepIntervalMs: number;
   maxPdfBytes: number;
   maxLogBytes: number;
-  /** COMPILE_MIN_FREE_BYTES: con menos espacio libre en la raíz, los jobs fallan sin compilar. */
+  /** Topes de la instantánea que se baja; los mismos que el server aplica a un proyecto. */
+  maxInputBytes: number;
+  maxInputFiles: number;
+  /** COMPILE_MIN_FREE_BYTES: con menos espacio libre en el disco de trabajo, los jobs fallan sin compilar. */
   minFreeBytes: number;
 }
 
@@ -42,8 +41,15 @@ const MB = 1024 * 1024;
 export function loadConfig(env: Env = process.env): CompilerConfig {
   return {
     redisUrl: env.REDIS_URL ?? 'redis://127.0.0.1:6379',
-    storageDir: env.COMPILE_STORAGE_DIR ?? join(tmpdir(), DEFAULT_STORAGE_DIRNAME),
-    storageVolume: env.COMPILE_STORAGE_VOLUME === '' ? undefined : env.COMPILE_STORAGE_VOLUME,
+    storage: {
+      endpoint: env.S3_ENDPOINT ?? 'http://127.0.0.1:9000',
+      region: env.S3_REGION ?? 'us-east-1',
+      accessKey: env.S3_ACCESS_KEY ?? 'latexweb',
+      secretKey: env.S3_SECRET_KEY ?? 'latexweb-dev-secret',
+      bucket: env.S3_BUCKET ?? 'latexweb',
+    },
+    workDir: env.COMPILE_WORK_DIR || join(tmpdir(), 'latexweb-compile-work'),
+    workVolume: env.COMPILE_WORK_VOLUME === '' ? undefined : env.COMPILE_WORK_VOLUME,
     image: env.COMPILE_IMAGE ?? 'latexweb-texlive:tl2026-2',
     timeoutSeconds: envPositiveInteger(env, 'COMPILE_TIMEOUT_SECONDS', 60),
     cpus: envPositiveNumber(env, 'COMPILE_CPUS', 1),
@@ -51,10 +57,11 @@ export function loadConfig(env: Env = process.env): CompilerConfig {
     pidsLimit: envPositiveInteger(env, 'COMPILE_PIDS_LIMIT', 128),
     tmpfsSize: envSize(env, 'COMPILE_TMPFS_SIZE', '256m'),
     concurrency: envPositiveInteger(env, 'COMPILE_CONCURRENCY', 2),
-    ttlSeconds: envPositiveInteger(env, 'COMPILE_TTL_SECONDS', 3600),
     sweepIntervalMs: 10 * 60 * 1000,
     maxPdfBytes: envPositiveInteger(env, 'COMPILE_MAX_PDF_BYTES', 50 * MB),
     maxLogBytes: envPositiveInteger(env, 'COMPILE_MAX_LOG_BYTES', 5 * MB),
+    maxInputBytes: envPositiveInteger(env, 'PROJECT_MAX_BYTES', 200 * MB),
+    maxInputFiles: envPositiveInteger(env, 'PROJECT_MAX_FILES', 500),
     minFreeBytes: envPositiveInteger(env, 'COMPILE_MIN_FREE_BYTES', 1024 * MB),
   };
 }

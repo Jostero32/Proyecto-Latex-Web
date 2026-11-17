@@ -106,3 +106,17 @@ export const shareLinks = pgTable(
 export type User = typeof users.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export type FileRow = typeof files.$inferSelect;
+
+/** Compilaciones de un proyecto. El estado y el resultado están en el job de BullMQ; los artefactos, en S3. */
+export const compilations = pgTable(
+  'compilations',
+  {
+    id: uuid('id').primaryKey(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+  },
+  (table) => [index('compilations_project_id_idx').on(table.projectId)],
+);

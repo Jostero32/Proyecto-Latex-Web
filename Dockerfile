@@ -27,10 +27,6 @@ COPY web/package.json web/
 COPY shared/package.json shared/
 COPY tsconfig.base.json ./
 COPY shared shared
-# Raíz de almacenamiento compartida (volumen latexweb-compile-storage). Docker inicializa un volumen
-# vacío copiando este directorio de la imagen, con su dueño: así el usuario `node` (uid 1000) del
-# server puede crear las carpetas de cada compilación.
-RUN mkdir -p /data/compilations && chown node:node /data/compilations
 
 # --- API REST + colaboración ---
 FROM base AS server
@@ -57,6 +53,8 @@ RUN pnpm install --frozen-lockfile --prod --filter "@latexweb/compiler..."
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY compiler/tsconfig.json compiler/
 COPY compiler/src compiler/src
+# Disco de trabajo del worker (volumen latexweb-compile-work, solo suyo).
+RUN mkdir -p /data/work && chmod 0700 /data/work
 WORKDIR /app/compiler
 CMD ["node", "node_modules/tsx/dist/cli.mjs", "src/index.ts"]
 

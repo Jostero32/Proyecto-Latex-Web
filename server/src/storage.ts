@@ -1,13 +1,16 @@
 // Almacenamiento de objetos (MinIO, API S3): binarios de los proyectos y, desde el paso 4, las
-// compilaciones. Claves: projects/<projectId>/files/<fileId>.
+// compilaciones. Claves: projects/<projectId>/files/<fileId> y compilations/<id>/… (ver shared).
 import type { Readable } from 'node:stream';
+import { COMPILATIONS_PREFIX } from '@latexweb/shared';
 import {
+  CopyObjectCommand,
   CreateBucketCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
   ListObjectsV2Command,
   NoSuchKey,
+  PutBucketLifecycleConfigurationCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -22,12 +25,14 @@ export interface StorageConfig {
 
 export interface Storage {
   put(key: string, body: Buffer): Promise<void>;
+  /** Copia dentro del bucket (sin pasar los bytes por el server). */
+  copy(from: string, to: string): Promise<void>;
   /** Contenido como stream; null si no existe. */
   get(key: string): Promise<Readable | null>;
   getBuffer(key: string): Promise<Buffer | null>;
   delete(keys: readonly string[]): Promise<void>;
   deletePrefix(prefix: string): Promise<void>;
-  /** Crea el bucket si no existe. */
+  /** Crea el bucket si no existe y le pone la regla que borra las compilaciones al día. */
   ensureBucket(): Promise<void>;
   close(): void;
 }
@@ -62,6 +67,9 @@ export function createStorage(config: StorageConfig): Storage {
     async put(key, body) {
       await client.send(new PutObjectCommand({ Bucket, Key: key, Body: body, ContentLength: body.length }));
     },
+    async copy(from, to) {
+      await client.send(new CopyObjectCommand({ Bucket, Key: to, CopySource: `${Bucket}/${from}` }));
+    },
     async get(key) {
       try {
         const object = await client.send(new GetObjectCommand({ Bucket, Key: key }));
@@ -95,6 +103,15 @@ export function createStorage(config: StorageConfig): Storage {
       } catch {
         await client.send(new CreateBucketCommand({ Bucket }));
       }
+      // Retención de las compilaciones (instantánea y artefactos): la hace MinIO, sin barrido propio.
+      await client.send(
+        new PutBucketLifecycleConfigurationCommand({
+          Bucket,
+          LifecycleConfiguration: {
+            Rules: [{ ID: 'compilaciones', Status: 'Enabled', Filter: { Prefix: COMPILATIONS_PREFIX }, Expiration: { Days: 1 } }],
+          },
+        }),
+      );
     },
     close() {
       client.destroy();

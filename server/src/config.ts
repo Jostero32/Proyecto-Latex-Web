@@ -1,33 +1,11 @@
 // Configuración de server. Único lugar donde se lee process.env (ver CLAUDE.md).
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { DEFAULT_STORAGE_DIRNAME, envPositiveInteger, type Env } from '@latexweb/shared';
+import { envPositiveInteger, type Env } from '@latexweb/shared';
+import type { CompileConfig } from './features/compile/service';
 import type { ProjectLimits } from './features/files/service';
 import { DEFAULT_ALLOWED_HOSTS, DEFAULT_ALLOWED_ORIGINS, type RequestGuardOptions } from './http';
 import type { StorageConfig } from './storage';
 
 export { ConfigError } from '@latexweb/shared';
-
-export interface UploadLimits {
-  maxFileBytes: number;
-  maxTotalBytes: number;
-  maxFiles: number;
-}
-
-export interface CompilationsConfig {
-  /** Raíz compartida con el worker (COMPILE_STORAGE_DIR); el mismo valor por defecto que el worker. */
-  storageDir: string;
-  upload: UploadLimits;
-  /** Si hay más trabajos esperando, POST responde 503. */
-  maxQueued: number;
-  ttlSeconds: number;
-  /** Solo para informar el límite en el error pdf_too_large; el que lo aplica es el worker. */
-  maxPdfBytes: number;
-  /** Subidas leyéndose a la vez (cada una ocupa hasta ~maxTotalBytes de memoria). Por defecto 4. */
-  maxConcurrentUploads?: number;
-  /** Si queda menos espacio libre en la raíz, POST responde 507. Por defecto no se comprueba. */
-  minFreeBytes?: number;
-}
 
 export interface ServerConfig {
   host: string;
@@ -42,7 +20,9 @@ export interface ServerConfig {
   /** MinIO (S3): binarios de los proyectos. */
   storage: StorageConfig;
   projects: ProjectLimits;
-  compilations: CompilationsConfig;
+  compile: CompileConfig;
+  /** Swagger UI en /api/docs (API_DOCS=false lo apaga). */
+  apiDocs: boolean;
 }
 
 const MB = 1024 * 1024;
@@ -74,19 +54,12 @@ export function loadConfig(env: Env = process.env): ServerConfig {
       fileMaxBytes: envPositiveInteger(env, 'FILE_MAX_BYTES', 50 * MB),
       docMaxBytes: envPositiveInteger(env, 'DOC_MAX_BYTES', 10 * MB),
     },
-    compilations: {
-      storageDir: env.COMPILE_STORAGE_DIR ?? join(tmpdir(), DEFAULT_STORAGE_DIRNAME),
-      upload: {
-        maxFileBytes: envPositiveInteger(env, 'COMPILE_MAX_UPLOAD_FILE_BYTES', 20 * MB),
-        maxTotalBytes: envPositiveInteger(env, 'COMPILE_MAX_UPLOAD_TOTAL_BYTES', 50 * MB),
-        maxFiles: envPositiveInteger(env, 'COMPILE_MAX_UPLOAD_FILES', 200),
-      },
+    compile: {
       maxQueued: envPositiveInteger(env, 'COMPILE_MAX_QUEUED', 50),
-      ttlSeconds: envPositiveInteger(env, 'COMPILE_TTL_SECONDS', 3600),
-      maxPdfBytes: envPositiveInteger(env, 'COMPILE_MAX_PDF_BYTES', 50 * MB),
-      maxConcurrentUploads: envPositiveInteger(env, 'COMPILE_MAX_CONCURRENT_UPLOADS', 4),
-      minFreeBytes: envPositiveInteger(env, 'COMPILE_MIN_FREE_BYTES', 1024 * MB),
+      // Igual que la regla del bucket, que borra las compilaciones a 1 día.
+      ttlSeconds: envPositiveInteger(env, 'COMPILE_TTL_SECONDS', 24 * 60 * 60),
     },
+    apiDocs: env.API_DOCS !== 'false',
   };
 }
 

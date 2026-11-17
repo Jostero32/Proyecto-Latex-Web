@@ -86,11 +86,16 @@ se actualiza el tamaño de los archivos de texto editados por WebSocket (cuenta 
   los chequeos de disco en el server. El compiler pasa a estar en una red con MinIO; las compilaciones
   siguen sin red.
 
+**Documentación de la API (agregado al paso 4)**: `@fastify/swagger` genera OpenAPI 3.1 de los esquemas
+de cada ruta y `@fastify/swagger-ui` lo sirve en `/api/docs` (`API_DOCS=false` lo apaga). Los esquemas de
+respuesta también serializan. Seguridad declarada: la cookie `sid`.
+
 **Dependencias**
 - Nuevas:
   - `drizzle-orm` y `drizzle-kit` (dev): ORM sin generación de código ni binarios;
   - `@aws-sdk/client-s3` (server y compiler): cliente S3 estándar, para MinIO;
-  - `yauzl` y `yazl`: zip en streaming.
+  - `yauzl` y `yazl`: zip en streaming;
+  - `@fastify/swagger` y `@fastify/swagger-ui`: documentación de la API.
 - Se quitan: `@prisma/client`, `@prisma/adapter-pg` y `prisma`.
 
 **Config**: `S3_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `PROJECT_MAX_BYTES`
@@ -119,13 +124,13 @@ en memoria) y `DOC_MAX_BYTES` (10 MB, paso 3).
 Al final: verificación en vivo en el stack de compose y `/security-review`.
 
 ## 5. Criterios de aceptación
-- [ ] `docker compose up -d --build` con la base vacía crea las tablas solo y no tiene servicio `migrate`.
+- [x] `docker compose up -d --build` con la base vacía crea las tablas solo y no tiene servicio `migrate`.
 - [ ] Crear un proyecto, importar los 6 fixtures como zip, compilarlos y bajar PDF, log y synctex: los 6 dan
       `success`. Un error de LaTeX aparece en `diagnostics` con archivo y línea.
-- [ ] Un no miembro recibe 404 en el proyecto, los archivos, la compilación y sus artefactos. Un lector
+- [x] Un no miembro recibe 404 en el proyecto, los archivos, la compilación y sus artefactos. Un lector
       recibe 403 al escribir y no puede escribir por WebSocket. Un editor no gestiona miembros.
-- [ ] Una edición por WebSocket se ve en `GET /files/:id` y en la siguiente compilación.
-- [ ] Un zip con `../`, con un symlink, con demasiadas entradas o que se infla por encima del tope se rechaza
+- [x] Una edición por WebSocket se ve en `GET /files/:id` y en la siguiente compilación.
+- [x] Un zip con `../`, con un symlink, con demasiadas entradas o que se infla por encima del tope se rechaza
       sin escribir nada.
 - [ ] No quedan referencias a Prisma, a `apps/` ni a `packages/`. `pnpm test`, `typecheck`, `lint`,
       `test:compile` y CI pasan.

@@ -10,6 +10,7 @@
     "image:build": "docker build -t latexweb-texlive:tl2026-2 texlive"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1169.0",
     "@latexweb/shared": "workspace:*",
     "bullmq": "^6.7.5",
     "ioredis": "^6.0.0",

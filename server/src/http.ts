@@ -14,6 +14,8 @@ export class ApiError extends Error {
     readonly statusCode: number,
     readonly code: string,
     message: string,
+    /** Cabeceras de la respuesta, p. ej. Retry-After. */
+    readonly headers: Record<string, string> = {},
   ) {
     super(message);
   }
@@ -25,7 +27,7 @@ export class ApiError extends Error {
  */
 export function registerApiErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ApiError) return sendError(reply, error.statusCode, error.code, error.message);
+    if (error instanceof ApiError) return sendError(reply.headers(error.headers), error.statusCode, error.code, error.message);
     const status = typeof error.statusCode === 'number' ? error.statusCode : 500;
     if (status === 413) return sendError(reply, 413, 'payload_too_large', 'La petición supera el tamaño máximo');
     if (status >= 400 && status < 500) return sendError(reply, status, 'invalid_request', error.message);
