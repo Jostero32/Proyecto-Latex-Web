@@ -36,7 +36,9 @@ FROM base AS server
 COPY apps/server apps/server
 WORKDIR /app/apps/server
 USER node
-ENV SERVER_HOST=0.0.0.0 SERVER_PORT=3000
+# SERVER_HOST=0.0.0.0 lo define docker-compose.yml y no la imagen: un `docker run -p` suelto no debe
+# publicar en todas las interfaces una API sin autenticación.
+ENV SERVER_PORT=3000
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]

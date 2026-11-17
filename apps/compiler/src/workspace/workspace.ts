@@ -6,7 +6,7 @@
 //   <root>/<id>/output.pdf|log   artefactos publicados por el worker (los sirve la API)
 //
 // Cuando se reemplace por MinIO, solo cambia esta implementación: el processor usa la interfaz.
-import { chown, constants, lstat, mkdir, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { constants, lstat, mkdir, open, readdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ARTIFACT_FILES, isCompilationId } from '@latexweb/shared';
 import { isSafeMountSource, type ContainerUser } from '../docker/docker-args';
@@ -66,7 +66,7 @@ const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 export function createLocalWorkspace(options: LocalWorkspaceOptions): Workspace {
   const { root, maxPdfBytes, maxLogBytes, containerUser } = options;
   const getuid = 'getuid' in options ? options.getuid : process.getuid;
-  const chownDir = options.chownDir ?? chown;
+  const chownDir = options.chownDir ?? chownDirNoFollow;
 
   if (!isSafeMountSource(root)) {
     throw new WorkspaceError(`raíz de almacenamiento inválida (debe ser absoluta y sin , " ni caracteres de control): ${root}`);
@@ -190,9 +190,32 @@ async function publishLogTail(source: string, target: string, maxBytes: number):
 
   const notice = `[latexweb] El log original tenía ${stats.size} bytes; se muestran los últimos ${tail.length}.\n\n`;
   const temporary = `${target}.tmp`;
-  await writeFile(temporary, Buffer.concat([Buffer.from(notice, 'utf8'), tail]));
+  // El worker puede correr como root y la carpeta es de otro usuario (el server en docker compose):
+  // nunca seguir un symlink que alguien haya dejado en la ruta del temporal. rm borra el enlace, no
+  // su destino, y O_CREAT|O_EXCL falla si la ruta vuelve a existir, sea lo que sea.
+  await rm(temporary, { force: true });
+  const out = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | O_NOFOLLOW, 0o644);
+  try {
+    await out.writeFile(Buffer.concat([Buffer.from(notice, 'utf8'), tail]));
+  } finally {
+    await out.close();
+  }
   await rename(temporary, target);
   return true;
+}
+
+/**
+ * chown de un directorio sin seguir symlinks: se abre con O_NOFOLLOW|O_DIRECTORY y se cambia el
+ * dueño sobre el descriptor (fchown). Con chown(path), si alguien reemplaza el directorio por un
+ * symlink entre el mkdir y el chown, un worker root cambiaría el dueño del destino.
+ */
+async function chownDirNoFollow(path: string, uid: number, gid: number): Promise<void> {
+  const handle = await open(path, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | O_NOFOLLOW);
+  try {
+    await handle.chown(uid, gid);
+  } finally {
+    await handle.close();
+  }
 }
 
 /** Stats de un archivo regular, o null si no existe o es otra cosa (symlink, directorio, FIFO…). */

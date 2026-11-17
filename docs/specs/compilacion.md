@@ -23,7 +23,8 @@ proyectos persistentes y MinIO.
 - Rate limiting por cliente: el control es el tope de la cola más la concurrencia del worker.
 - Parseo de errores del log (tendrá su propia spec), SyncTeX y compilación incremental (cada compilación
   empieza de cero).
-- Subida en zip, frontend, y el worker dentro de un contenedor (rootless/gVisor).
+- Subida en zip y frontend. (El worker dentro de un contenedor se agregó después, para uso local, en
+  `docs/specs/docker-compose.md`; Docker sin root o gVisor quedan para la spec `despliegue`.)
 
 ## 3. Diseño
 
@@ -305,9 +306,10 @@ Al terminar cada paso se corren `pnpm test`, `pnpm typecheck` y `pnpm lint`.
 
 ## 7. Riesgos
 **Seguridad**
-- **Socket de Docker:** quien accede a él tiene root en el host. Hoy el worker corre en el host. Cuando se
-  meta en un contenedor habrá que evaluar Docker sin root o gVisor (`--runtime runsc`), porque el kernel es
-  compartido.
+- **Socket de Docker:** quien accede a él tiene root en el host. Con `pnpm dev` el worker corre en el host;
+  con `docker compose --profile apps` corre en un contenedor que monta el socket (riesgo aceptado para uso
+  local, ver `docs/specs/docker-compose.md` §7). Para producción hace falta Docker sin root o gVisor
+  (`--runtime runsc`), porque el kernel es compartido.
 - **Inyección vía latexmk:** latexmk ejecuta cadenas con `/bin/sh`. El patrón estricto de `mainFile` es
   obligatorio en la API **y** en el worker. Nunca usar `-e` ni `-r` con datos del usuario.
 - **TeX puede leer cualquier archivo del contenedor.** Desde TeX Live 2026, `openin_any` no tiene efecto

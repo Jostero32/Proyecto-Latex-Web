@@ -140,6 +140,15 @@ Verificado en Docker 29.5.3 (API 1.54) con todos los flags del sandbox:
   gVisor (spec `despliegue`).
 - **Volumen compartido:** `server` y `compiler` ven todas las compilaciones, igual que hoy con la carpeta
   compartida. Las compilaciones solo ven su subcarpeta, y Docker impide escapar de ella (verificado).
+  Eso depende de que el daemon soporte `volume-subpath` (API ≥ 1.45, Docker 26): en modo volumen el worker
+  lo comprueba al arrancar y se detiene si la API es anterior.
+- **Worker root sobre carpetas del server:** `<id>/` es del uid 1000 del server, y el worker es root.
+  Un server comprometido podría dejar symlinks para que el worker escriba o cambie dueños donde no
+  debe. Por eso el worker hace `chown` sobre el descriptor (`O_NOFOLLOW|O_DIRECTORY` y `fchown`) y crea
+  el temporal del log con `O_CREAT|O_EXCL|O_NOFOLLOW`. Hallazgo de `revisor-seguridad`.
+- **Linux:** con Docker Engine anterior a 28, los puertos publicados en `127.0.0.1` podían ser accesibles
+  desde la misma red L2 (según las notas de versión, no verificado). Se recomienda Docker Engine 28 o
+  posterior.
 - **El barrido sigue funcionando** dentro del worker sobre `/data/compilations`. Los datos persisten entre
   reinicios del stack mientras exista el volumen.
 - **Tamaño:** la imagen de las apps suma unos cientos de MB (Node y dependencias) a los ~5 GB de TeX Live,

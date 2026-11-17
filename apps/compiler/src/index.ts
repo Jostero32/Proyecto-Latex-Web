@@ -3,7 +3,7 @@ import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { COMPILE_QUEUE, type CompileJobData, type CompileJobResult, type ServiceName } from '@latexweb/shared';
 import { loadConfig } from './config';
-import { checkDocker } from './docker/docker-check';
+import { checkDocker, MIN_API_FOR_VOLUME_SUBPATH } from './docker/docker-check';
 import { resolveContainerUser } from './docker/docker-args';
 import { createLocalWorkspace } from './workspace/workspace';
 import { createCompileProcessor } from './worker/processor';
@@ -13,7 +13,10 @@ const service: ServiceName = 'compiler';
 async function main(): Promise<void> {
   const config = loadConfig();
 
-  const docker = await checkDocker(config.image);
+  const docker = await checkDocker(config.image, {
+    // En modo volumen el aislamiento entre compilaciones depende de volume-subpath.
+    minApiVersion: config.storageVolume === undefined ? undefined : MIN_API_FOR_VOLUME_SUBPATH,
+  });
   if (!docker.ok) {
     console.error(`[${service}] No se puede arrancar: ${docker.message}`);
     process.exit(1);
