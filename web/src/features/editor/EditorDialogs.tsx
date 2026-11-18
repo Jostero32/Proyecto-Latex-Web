@@ -1,10 +1,12 @@
 // Diálogos del editor: ajustes del proyecto, nuevo archivo, buscar archivo (Ctrl+P) y log completo.
 import { useState, type KeyboardEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { normalizeProjectPath, type Engine, type PathRejectReason, type ProjectFile } from '@latexweb/shared';
 import { Button } from '../../components/Button';
 import { Dialog } from '../../components/Dialog';
 import { SelectField, TextField } from '../../components/Field';
 import { Icon } from '../../components/Icon';
+import { download, errorMessage, fetchApi, isApiError } from '../../lib/api';
 import { fileIcon } from './tree';
 import { ENGINE_LABELS } from './PdfPane';
 
@@ -268,30 +270,46 @@ function Highlight({ text, query }: { text: string; query: string }) {
   );
 }
 
-const SAMPLE_LOG = `This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2026) (preloaded format=pdflatex)
-entering extended mode
-(./main.tex
-LaTeX2e <2025-11-01>
-(/usr/local/texlive/2026/texmf-dist/tex/latex/base/article.cls
-Document Class: article 2024/06/29 v1.4n Standard LaTeX document class
-)
-(/usr/local/texlive/2026/texmf-dist/tex/generic/babel/babel.sty
-Package babel Info: Hyphen rules for spanish loaded.
-)
-
-! LaTeX Error: File \`bookstabs.sty' not found.
-
-l.5 \\usepackage
-                {bookstabs}^^M
-! Undefined control sequence.
-l.28 donde $A$ está en t/ha por año. Ver la \\tabla
-                                                   {res}.
-Output written on output.pdf (2 pages, 48213 bytes).`;
-
-export function LogDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** El log de la compilación: se baja al abrir el diálogo. */
+export function LogDialog({ open, onClose, logUrl, compiled }: { open: boolean; onClose: () => void; logUrl: string | null; compiled: boolean }) {
+  const log = useQuery({
+    queryKey: ['log', logUrl],
+    enabled: open && logUrl !== null,
+    staleTime: Infinity,
+    queryFn: async ({ signal }) => {
+      if (!logUrl) return '';
+      return (await fetchApi(logUrl, signal)).text();
+    },
+  });
+  const status = !compiled
+    ? 'Todavía no compilaste este proyecto.'
+    : !logUrl
+      ? 'Esta compilación no dejó log.'
+      : log.isPending
+        ? 'Cargando el log…'
+        : log.isError
+          ? isApiError(log.error, 'expired')
+            ? 'El log venció: volvé a compilar para verlo.'
+            : errorMessage(log.error)
+          : null;
   return (
-    <Dialog open={open} onClose={onClose} title="Log completo" subtitle="output.log · última compilación" width="lg" footer={<Button icon="download">Descargar log</Button>}>
-      <pre className="m-0 max-h-[50vh] overflow-auto rounded-lg bg-bg p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap text-text">{SAMPLE_LOG}</pre>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Log completo"
+      subtitle="output.log · última compilación"
+      width="lg"
+      footer={
+        <Button icon="download" disabled={!logUrl} onClick={() => logUrl && download(logUrl, 'output.log')}>
+          Descargar log
+        </Button>
+      }
+    >
+      {status ? (
+        <p className="m-0 rounded-lg bg-bg p-4 text-sm text-muted">{status}</p>
+      ) : (
+        <pre className="m-0 max-h-[50vh] overflow-auto rounded-lg bg-bg p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap text-text">{log.data}</pre>
+      )}
     </Dialog>
   );
 }

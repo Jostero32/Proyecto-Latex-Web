@@ -1,11 +1,11 @@
 // Editor: archivos a la izquierda, código al centro, PDF a la derecha y el panel de problemas abajo. Los
 // costados se ocultan (queda un riel) y se redimensionan. Proyecto y árbol vienen de la API; el texto se
-// edita en vivo con los demás (Yjs por WebSocket, ver collab.ts). La compilación todavía es simulada
-// (paso 4): `?compilar=errores|timeout|fallo|cola|grande` elige qué devuelve.
+// edita en vivo con los demás (Yjs por WebSocket, ver collab.ts). Compilar: compile.ts; el PDF, PdfView;
+// ir del código al PDF y volver, synctex.ts.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { useQueryClient } from '@tanstack/react-query';
-import type { Diagnostic, Engine, ProjectFile, ProjectSummary, UpdateProjectRequest } from '@latexweb/shared';
+import { Link, useNavigate, useParams } from 'react-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { Compilation, Engine, ProjectFile, ProjectSummary, UpdateProjectRequest } from '@latexweb/shared';
 import type * as Y from 'yjs';
 import { FullScreenError, FullScreenLoading } from '../../app/RequireAuth';
 import { colorFor, type Presence } from '../../components/Avatar';
@@ -13,19 +13,20 @@ import { Button, IconButton } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Icon, type IconName } from '../../components/Icon';
 import { Notice } from '../../components/Notice';
-import { download, errorMessage, isApiError } from '../../lib/api';
+import { download, errorMessage, fetchApi, isApiError } from '../../lib/api';
 import { formatBytes, MOD_KEY } from '../../lib/format';
-import { DIAGNOSTICS_ERRORS } from '../../lib/mock';
 import { useCurrentUser } from '../auth/api';
 import { exportUrl, projectKey, projectsKey, useDeleteProject, useProject, useUpdateProject } from '../projects/api';
 import { ShareDialog } from '../sharing/ShareDialog';
 import { fileUrl, filesKey, useDeleteFile, useFiles, useRenameFile, useUploadFiles, type Upload } from './api';
 import { useCollab } from './collab';
+import { useCompile } from './compile';
 import { FileSearchDialog, LogDialog, NewFileDialog, RenameFileDialog, SettingsDialog } from './EditorDialogs';
 import { FileTree } from './FileTree';
 import { LatexEditor, type ErrorLines, type FormatAction, type LatexEditorHandle } from './LatexEditor';
-import { PdfPane, type CompilePhase, type CompileResult } from './PdfPane';
+import { PdfPane } from './PdfPane';
 import { ProblemsPanel } from './ProblemsPanel';
+import { forwardSearch, inverseSearch, loadSynctex, parseSynctex, type SyncRect } from './synctex';
 import { TopBar, type Connection } from './TopBar';
 import { baseName, buildTree, fileIcon, isImage } from './tree';
 
@@ -63,11 +64,9 @@ export function EditorPage() {
 }
 
 function Editor({ project, files }: { project: ProjectSummary; files: ProjectFile[] }) {
-  const [params] = useSearchParams();
   const navigate = useNavigate();
   const client = useQueryClient();
   const me = useCurrentUser();
-  const demoCompile = params.get('compilar');
   const id = project.id;
 
   // Avisos del server por el WebSocket: alguien cambió el árbol o los datos del proyecto.
@@ -109,15 +108,11 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
   const picker = useRef<HTMLInputElement>(null);
   const editor = useRef<LatexEditorHandle>(null);
 
-  const [phase, setPhase] = useState<CompilePhase>('idle');
-  const [seconds, setSeconds] = useState(0);
-  const [result, setResult] = useState<CompileResult | null>(null);
-  const [diagnostics, setDiagnostics] = useState<Diagnostic[] | null>(null);
-  const [hasPdf, setHasPdf] = useState(false);
   const [problemsOpen, setProblemsOpen] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [jump, setJump] = useState<{ line: number; key: number } | null>(null);
-  const [syncLine, setSyncLine] = useState<number | null>(null);
+  const [highlight, setHighlight] = useState<{ rects: SyncRect[]; key: number } | null>(null);
+  const [pdfMessage, setPdfMessage] = useState<string | null>(null);
   const [cursor, setCursor] = useState<{ line: number; column: number } | null>(null);
 
   const tree = useMemo(() => buildTree(files), [files]);
@@ -147,60 +142,63 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
         ? 'sincronizando'
         : 'guardado';
 
-  // Compilación simulada (paso 4): en cola → compilando (con el tiempo corriendo) → resultado.
-  const compile = useCallback(() => {
-    if (phase !== 'idle') return;
-    setSyncLine(null);
-    if (demoCompile === 'cola') {
-      setSeconds(8);
-      setPhase('busy');
-      return;
-    }
-    setPhase('queued');
-  }, [phase, demoCompile]);
+  // Compilar: el server compila su copia, así que primero espera (hasta 3 s) a que tenga lo escrito.
+  const { whenSaved } = collab;
+  const compiler = useCompile(id, {
+    beforeCompile: () => whenSaved(3000),
+    onFinish: (done: Compilation) => {
+      setSelected(null);
+      setHighlight(null);
+      if (done.diagnostics?.some((d) => d.level === 'error')) setProblemsOpen(true);
+    },
+  });
+  const { phase, result, pdf } = compiler;
+  const runCompile = compiler.compile;
+  const compile = useCallback(() => void runCompile(), [runCompile]);
+  const { compilation } = compiler;
+  const diagnostics = useMemo(() => (compilation ? (compilation.diagnostics ?? []) : null), [compilation]);
 
-  useEffect(() => {
-    if (phase === 'queued') {
-      const timer = setTimeout(() => {
-        setSeconds(0);
-        setPhase('running');
-      }, 700);
-      return () => clearTimeout(timer);
-    }
-    if (phase === 'running') {
-      const tick = setInterval(() => setSeconds((s) => s + 1), 1000);
-      const done = setTimeout(() => {
-        setPhase('idle');
-        if (demoCompile === 'timeout') setResult({ status: 'timeout', durationMs: 120_000, errorCount: 0 });
-        else if (demoCompile === 'fallo') setResult({ status: 'failed', durationMs: 0, errorCount: 0 });
-        else if (demoCompile === 'grande') setResult({ status: 'success', durationMs: 4200, errorCount: 0, pdfTooLarge: true });
-        else if (demoCompile === 'errores') {
-          setResult({ status: 'error', durationMs: 2600, errorCount: 2 });
-          setDiagnostics(DIAGNOSTICS_ERRORS);
-          setProblemsOpen(true);
-        } else {
-          setResult({ status: 'success', durationMs: 1800, errorCount: 0 });
-          setDiagnostics([]);
-          setHasPdf(true);
-        }
-      }, 2300);
-      return () => {
-        clearInterval(tick);
-        clearTimeout(done);
-      };
-    }
-    if (phase === 'busy') {
-      const tick = setInterval(() => setSeconds((s) => s - 1), 1000);
-      return () => clearInterval(tick);
-    }
-  }, [phase, demoCompile]);
+  // El SyncTeX del PDF que se muestra (se baja una vez por compilación).
+  const synctexText = useQuery({
+    queryKey: ['synctex', pdf?.synctexUrl],
+    enabled: Boolean(pdf?.synctexUrl),
+    staleTime: Infinity,
+    gcTime: 60_000,
+    queryFn: async ({ signal }) => (pdf?.synctexUrl ? loadSynctex(await fetchApi(pdf.synctexUrl, signal)) : ''),
+  });
+  const filePaths = useMemo(() => files.map((f) => f.path), [files]);
+  const sync = useMemo(
+    () => (synctexText.data && pdf ? parseSynctex(synctexText.data, filePaths, pdf.mainFile) : null),
+    [synctexText.data, filePaths, pdf],
+  );
 
+  // El aviso sobre el PDF se va solo.
   useEffect(() => {
-    if (phase === 'busy' && seconds <= 0) {
-      const timer = setTimeout(() => setPhase('idle'), 0);
-      return () => clearTimeout(timer);
+    if (!pdfMessage) return;
+    const timer = setTimeout(() => setPdfMessage(null), 3500);
+    return () => clearTimeout(timer);
+  }, [pdfMessage]);
+
+  /** Código → PDF: marca en el PDF la línea del cursor. */
+  const showInPdf = () => {
+    setRight((value) => ({ ...value, open: true }));
+    if (!pdf) return setPdfMessage('Compilá primero para ver la línea en el PDF.');
+    if (!sync) {
+      return setPdfMessage(
+        synctexText.isError
+          ? isApiError(synctexText.error, 'expired')
+            ? 'La compilación venció: volvé a compilar.'
+            : 'No pudimos leer la ubicación del PDF.'
+          : pdf.synctexUrl
+            ? 'Un momento: todavía estamos leyendo el PDF.'
+            : 'Esta compilación no permite ubicar líneas en el PDF.',
+      );
     }
-  }, [phase, seconds]);
+    if (!activePath || activeFile?.kind !== 'text') return;
+    const rects = forwardSearch(sync, activePath, cursor?.line ?? 1);
+    if (rects.length === 0) return setPdfMessage('Esa parte del código no aparece en el PDF.');
+    setHighlight({ rects, key: Date.now() });
+  };
 
   // Atajos: Ctrl/⌘+S y Ctrl/⌘+Enter compilan; Ctrl/⌘+P busca un archivo.
   useEffect(() => {
@@ -244,10 +242,10 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
 
   const errorLines = useMemo<ErrorLines>(() => {
     const map: ErrorLines = new Map();
-    if (result?.status !== 'error' || phase !== 'idle') return map;
+    if (phase !== 'idle') return map;
     for (const d of diagnostics ?? []) if (d.level === 'error' && d.file === activePath && d.line) map.set(d.line, culprit(d.message));
     return map;
-  }, [diagnostics, activePath, result, phase]);
+  }, [diagnostics, activePath, phase]);
 
   const pathById = useMemo(() => new Map(files.map((f) => [f.id, f.path])), [files]);
   const presence: Presence[] = [
@@ -359,7 +357,7 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
         <section aria-label="Editor de código" className="@container flex min-w-0 flex-1 flex-col bg-surface">
           <Tabs tabs={tabs} active={activePath} readOnly={readOnly} onSelect={(path) => openFile(path)} onClose={closeTab} />
           {activeFile?.kind === 'binary' ? null : !readOnly ? (
-            <FormatBar onFormat={(action) => editor.current?.format(action)} onSync={() => setSyncLine(cursor?.line ?? 1)} />
+            <FormatBar onFormat={(action) => editor.current?.format(action)} onSync={showInPdf} />
           ) : (
             <div role="note" className="flex h-11 flex-none items-center gap-2.5 border-b border-border bg-surface-2 px-3.5 text-[13.5px]">
               <Icon name="eye" size={16} />
@@ -368,7 +366,7 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
                 {canEdit ? (collab.synced ? 'No se puede editar este documento ahora.' : 'Esperando la conexión con el servidor…') : 'Podés compilar y descargar, pero no editar.'}
               </span>
               <span className="flex-1" />
-              <SyncButton onClick={() => setSyncLine(cursor?.line ?? 1)} />
+              <SyncButton onClick={showInPdf} />
             </div>
           )}
           {activeFile?.kind === 'binary' ? (
@@ -419,21 +417,24 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
             <div style={{ width: right.width }} className="flex-none">
               <PdfPane
                 phase={phase}
-                seconds={seconds}
+                seconds={compiler.seconds}
                 result={result}
-                hasPdf={hasPdf}
-                sample
+                pdfUrl={pdf?.url ?? null}
                 engine={project.engine}
                 canChangeEngine={canEdit}
-                syncLine={syncLine}
+                highlight={highlight}
+                canSync={sync !== null}
+                message={pdfMessage}
                 onCompile={compile}
                 onEngine={(engine: Engine) => saveProject({ engine })}
                 onHide={() => setRight({ ...right, open: false })}
                 onShowProblems={() => setProblemsOpen(true)}
                 onShowLog={() => setDialog('log')}
-                onJumpToLine={(line) => {
-                  setSyncLine(line);
-                  openFile(project.mainFile, line);
+                onDownload={() => pdf && download(pdf.url, `${project.name}.pdf`)}
+                onPoint={(page, x, y) => {
+                  const target = sync ? inverseSearch(sync, page, x, y) : null;
+                  if (target && paths.has(target.path)) openFile(target.path, target.line);
+                  else setPdfMessage('No encontramos el código de esa parte del PDF.');
                 }}
               />
             </div>
@@ -498,7 +499,7 @@ function Editor({ project, files }: { project: ProjectSummary; files: ProjectFil
         />
       )}
       <FileSearchDialog open={dialog === 'search'} onClose={() => setDialog(null)} files={files} onOpen={(path) => openFile(path)} />
-      <LogDialog open={dialog === 'log'} onClose={() => setDialog(null)} />
+      <LogDialog open={dialog === 'log'} onClose={() => setDialog(null)} logUrl={compiler.compilation?.logUrl ?? null} compiled={compiler.compilation !== null} />
       <ConfirmDialog
         open={deleting !== null}
         onClose={() => setDeleting(null)}

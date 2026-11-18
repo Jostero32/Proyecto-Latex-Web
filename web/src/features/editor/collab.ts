@@ -155,6 +155,23 @@ class ProjectCollab {
     this.set({ notice: null });
   }
 
+  /** Espera (hasta `timeoutMs`) a que el server confirme los cambios locales. */
+  whenSaved(timeoutMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.listeners.delete(check);
+        resolve();
+      };
+      const check = () => {
+        if (this.snapshot.unsynced === 0) done();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      this.listeners.add(check);
+      check();
+    });
+  }
+
   /** El archivo abierto, para que los demás vean dónde estoy. */
   setFile(fileId: string | null) {
     this.fileId = fileId;
@@ -197,6 +214,7 @@ class ProjectCollab {
 export interface UseCollab extends CollabSnapshot {
   setFile: (fileId: string | null) => void;
   dismissNotice: () => void;
+  whenSaved: (timeoutMs: number) => Promise<void>;
 }
 
 /** La sesión de colaboración del proyecto: se conecta al montar y se cierra al salir. */
@@ -212,7 +230,9 @@ export function useCollab(projectId: string, user: CollabUser, onServerNotice: (
   }, [collab]);
   const snapshot = useSyncExternalStore(collab.subscribe, collab.getSnapshot);
   return useMemo(
-    () => ({ ...snapshot, setFile: (fileId: string | null) => collab.setFile(fileId), dismissNotice: () => collab.dismissNotice() }),
+    () => ({ ...snapshot, setFile: (fileId: string | null) => collab.setFile(fileId), dismissNotice: () => collab.dismissNotice(),
+      whenSaved: (timeoutMs: number) => collab.whenSaved(timeoutMs),
+    }),
     [snapshot, collab],
   );
 }

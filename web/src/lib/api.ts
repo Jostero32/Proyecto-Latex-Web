@@ -23,10 +23,10 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
-async function send(path: string, { method = 'GET', json, form, signal }: RequestOptions): Promise<Response> {
+async function send(url: string, { method = 'GET', json, form, signal }: RequestOptions): Promise<Response> {
   let response: Response;
   try {
-    response = await fetch(`/api${path}`, {
+    response = await fetch(url, {
       method,
       credentials: 'same-origin',
       headers: json === undefined ? undefined : { 'content-type': 'application/json' },
@@ -50,9 +50,14 @@ async function send(path: string, { method = 'GET', json, form, signal }: Reques
 
 /** Petición con respuesta JSON (o sin cuerpo, en un 204). */
 export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const response = await send(path, options);
+  const response = await send(`/api${path}`, options);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+/** Respuesta cruda de una ruta completa de la API (`/api/compilations/…/pdf`): PDF, log o SyncTeX. */
+export function fetchApi(url: string, signal?: AbortSignal): Promise<Response> {
+  return send(url, { signal });
 }
 
 export const isApiError = (error: unknown, code?: string): error is ApiRequestError =>
@@ -64,10 +69,10 @@ export function errorMessage(error: unknown): string {
   return 'Algo salió mal. Reintentá en un momento.';
 }
 
-/** Descarga un archivo de la API (la respuesta trae Content-Disposition: attachment). */
-export function download(url: string): void {
+/** Descarga un archivo de la API; `filename` cambia el nombre que propone el server. */
+export function download(url: string, filename = ''): void {
   const link = document.createElement('a');
   link.href = url;
-  link.download = '';
+  link.download = filename;
   link.click();
 }

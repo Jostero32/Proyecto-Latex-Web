@@ -17,7 +17,7 @@ especificación, del 2026-11-17): sistema visual, pantallas en escritorio y celu
   Tailwind 4 con `@theme inline` (`bg-surface`, `text-muted`, `border-border-input`…). El tema se elige en
   el menú de la cuenta (claro, oscuro o el del sistema) y se recuerda en `localStorage`.
 - **Tipografías** (Google Fonts): Instrument Sans (interfaz), Newsreader (títulos), JetBrains Mono
-  (código, rutas y log). STIX Two Text solo para simular el PDF mientras no hay PDF.js.
+  (código, rutas y log) y STIX Two Text (la hoja de la entrada y los botones B e I).
 - **Íconos:** trazos SVG propios en `components/Icon.tsx`, sin librería de íconos.
 - **Rutas:** `/entrar`, `/` (mis proyectos), `/proyectos/:id` (editor), `/unirse/:token`.
 - **Contratos:** los datos de ejemplo usan los tipos de `@latexweb/shared` (`ProjectSummary`,
@@ -70,6 +70,28 @@ especificación, del 2026-11-17): sistema visual, pantallas en escritorio y celu
    - Se van las demos `?vista` y `?aviso` y el documento de ejemplo; queda `?compilar=` hasta el paso 4.
      El minimapa del diseño queda para después (backlog).
 4. **Compilar:** botón y atajos contra la API, PDF.js, panel de problemas con salto a la línea y SyncTeX.
+   - Compilar (botón, Ctrl/⌘+S, Ctrl/⌘+Enter): espera hasta 3 s a que el server confirme lo escrito
+     (`unsynced` en 0), porque compila el estado del server; después `POST /projects/:id/compile` y
+     consulta `GET /compilations/:id` cada segundo hasta que termina. En cola, compilando con los segundos
+     corriendo, o 503 `queue_full`: "Reintentá en N s" con el `Retry-After`. Cada persona ve sus
+     compilaciones; no se comparten.
+   - Resultado: `success`, `error` (con o sin PDF: latexmk en nonstopmode a veces lo genera), `timeout`,
+     `failed` (infraestructura) o PDF demasiado grande (`pdfMissingReason: too_large`). Si la última no dio
+     PDF, queda el anterior atenuado con el aviso; si dio PDF con errores, se muestra el nuevo y los errores
+     van al panel.
+   - PDF.js (`pdfjs-dist`): el PDF se baja con `fetch` (cookie de sesión) y se dibuja en canvas página por
+     página, solo las que están cerca de la vista; zoom, ajustar al ancho o a la página, página actual y
+     anterior o siguiente. Sin JavaScript del PDF (`isEvalSupported: false`, sin scripting), sin capa de
+     texto ni enlaces por ahora.
+   - Problemas y log: los diagnósticos reales en el panel (se abre solo si hay errores) y en el gutter del
+     editor; clic salta al archivo y la línea. El log se baja al abrirlo y se puede descargar; el PDF
+     también.
+   - SyncTeX en el navegador: `output.synctex.gz` se descomprime con `DecompressionStream` y se lee con un
+     parser propio (`synctex.ts`, con test). Las rutas del contenedor (`/work/./cap/intro.tex`) se
+     emparejan por sufijo con las del proyecto. "Ver en el PDF" marca el bloque de la línea del cursor;
+     clic en el PDF abre el archivo en la línea de ese punto.
+   - Si la compilación venció (410, más de un día), el log o el SyncTeX piden volver a compilar.
+   - Se van `?compilar=`, `lib/mock.ts` y la página y el log de muestra.
 
 Los pasos 2 a 4 se detallan antes de empezarlos.
 
@@ -106,6 +128,16 @@ Los pasos 2 a 4 se detallan antes de empezarlos.
       muestra "Ya no tenés acceso".
 - [x] Lo escrito sigue ahí al recargar; el indicador dice Guardado.
 - [x] El editor va en su propio chunk (CodeMirror y Yjs se bajan al abrir un proyecto).
+
+## Dependencias (paso 4)
+- `pdfjs-dist`: dibujar el PDF en el navegador (stack de CLAUDE.md). SyncTeX y gzip sin dependencias.
+
+## Criterios (paso 4)
+- [x] Compilar un proyecto con imágenes muestra el PDF; uno con errores muestra los errores en el panel y
+      en el gutter, y el clic lleva a la línea.
+- [x] "Ver en el PDF" marca el párrafo de la línea del cursor y el clic en el PDF vuelve al código, también
+      en un archivo de `\input`.
+- [x] Log y PDF se descargan; zoom, ajuste y páginas funcionan con un PDF de varias páginas.
 
 ## Riesgos y pendientes del diseño
 - Nombre del producto (Pliego o latexweb): está en una sola constante, `PRODUCT_NAME`.
