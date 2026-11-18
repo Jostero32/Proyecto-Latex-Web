@@ -143,3 +143,13 @@ Los pasos 2 a 4 se detallan antes de empezarlos.
 - Nombre del producto (Pliego o latexweb): está en una sola constante, `PRODUCT_NAME`.
 - Dominio real de los enlaces para compartir; voseo o tuteo.
 - Los 120 s de tiempo agotado y los 8 s de espera del diseño son ejemplos, no valores del backend.
+
+## Cierre (2026-11-18)
+- Verificación en vivo del paso 4 con un proyecto de prueba (`\input`, imagen, 3 páginas): compilar con
+  Ctrl+S justo después de escribir (entra lo recién escrito), PDF con zoom, ajuste y páginas, SyncTeX en
+  los dos sentidos (también en `cap/intro.tex`), error con PDF (se muestra el nuevo), error sin PDF (queda
+  el anterior atenuado), log y PDF con su tipo, consola sin errores.
+- Revisión de seguridad de la spec (web y los cambios del server): sin hallazgos críticos ni altos. El
+  WebSocket del mismo origen exige antes un `Host` permitido; la vista previa de un enlace pide sesión,
+  usa tokens de 256 bits y no expone el email del dueño; log, diagnósticos y rutas se muestran como texto;
+  PDF.js no ejecuta el JavaScript del PDF; `?volver=` solo acepta rutas propias y navega dentro de la app.
