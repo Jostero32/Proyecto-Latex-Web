@@ -3,7 +3,7 @@
 #
 #   docker compose up -d --build
 #       Toda la app: infraestructura (postgres, redis, minio), la imagen de TeX Live, server
-#       (API + colaboración, :3000), compiler (worker de la cola `compile`) y web (:5173).
+#       (API + colaboración, :53000), compiler (worker de la cola `compile`) y web (:55173).
 #       ATENCIÓN: el servicio compiler monta el socket de Docker del host, lo que equivale a root
 #       sobre el host. Es para uso local; no para producción.
 #
@@ -30,7 +30,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-latexweb}
       POSTGRES_DB: ${POSTGRES_DB:-latexweb}
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -45,7 +45,7 @@ services:
     # BullMQ requiere que Redis no expulse claves
     command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     ports:
-      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-56379}:6379"
     volumes:
       - redis-data:/data
     networks: [default, queue-server, queue-compiler]
@@ -65,8 +65,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-latexweb}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-latexweb-dev-secret}
     ports:
-      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_API_PORT:-59000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-59001}:9001"
     volumes:
       - minio-data:/data
     networks: [default, storage-compiler]
@@ -106,7 +106,7 @@ services:
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-latexweb-dev-secret}
       S3_BUCKET: ${S3_BUCKET:-latexweb}
       # Orígenes web que pueden usar la API y el WebSocket desde un navegador.
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://127.0.0.1:5173,http://localhost:5173}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://127.0.0.1:55173,http://localhost:55173}
       # Opcionales: si no se definen en .env, se usan los valores por defecto del código.
       COMPILE_TTL_SECONDS:
       COMPILE_MAX_QUEUED:
@@ -116,7 +116,7 @@ services:
       FILE_MAX_BYTES:
       DOC_MAX_BYTES:
     ports:
-      - "127.0.0.1:${SERVER_PORT:-3000}:3000"
+      - "127.0.0.1:${SERVER_PORT:-53000}:3000"
     networks: [default, queue-server]
     depends_on:
       redis:
@@ -191,7 +191,7 @@ services:
       # `vite preview` compila vite.config.ts aquí al arrancar.
       - /app/web/node_modules/.vite-temp:rw,nosuid,nodev,noexec,size=16m,uid=1000,gid=1000,mode=0700
     ports:
-      - "127.0.0.1:${WEB_PORT:-5173}:5173"
+      - "127.0.0.1:${WEB_PORT:-55173}:5173"
     depends_on:
       server:
         condition: service_healthy

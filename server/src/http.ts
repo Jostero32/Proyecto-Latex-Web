@@ -47,13 +47,13 @@ export function sendError<Code extends string>(
 }
 
 export interface RequestGuardOptions {
-  /** Orígenes exactos, p. ej. `http://localhost:5173`. */
+  /** Orígenes exactos, p. ej. `http://localhost:55173`. */
   allowedOrigins: readonly string[];
   /** Nombres de host sin puerto, p. ej. `127.0.0.1`, `localhost`, `[::1]`. */
   allowedHosts: readonly string[];
 }
 
-export const DEFAULT_ALLOWED_ORIGINS: readonly string[] = ['http://127.0.0.1:5173', 'http://localhost:5173'];
+export const DEFAULT_ALLOWED_ORIGINS: readonly string[] = ['http://127.0.0.1:55173', 'http://localhost:55173'];
 export const DEFAULT_ALLOWED_HOSTS: readonly string[] = ['127.0.0.1', 'localhost', '[::1]'];
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);

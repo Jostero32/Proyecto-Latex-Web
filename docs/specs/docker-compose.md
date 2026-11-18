@@ -80,7 +80,7 @@ Verificado en Docker 29.5.3 (API 1.54) con todos los flags del sandbox:
     desarrollo.
   - `.dockerignore` excluye `node_modules`, `.git`, `dist` y `.env*`.
 - **`server`:** usuario `node` (uid 1000). Escucha en `0.0.0.0:3000` y compose lo publica **solo** en
-  `127.0.0.1:3000`. Healthcheck sobre `/health`.
+  `127.0.0.1:53000`. Healthcheck sobre `/health`.
 - **`compiler`:**
   - **Binario de `docker`:** se copia desde `docker:29-cli`, fijada por digest. Es la única forma de que
     `runContainer` y `checkDocker` funcionen sin cambiar su código; no se agrega ninguna dependencia de npm.
@@ -89,7 +89,7 @@ Verificado en Docker 29.5.3 (API 1.54) con todos los flags del sandbox:
     lanza las compilaciones como `10001:10001` y hace `chown` de `out/` (`resolveContainerUser`).
   - En Linux, si se corre como no root, se usaría `group_add` con el GID del grupo `docker`; queda
     documentado, no se implementa.
-- **`web`:** `vite build` y `vite preview --host 0.0.0.0 --port 5173`, publicado en `127.0.0.1:5173`.
+- **`web`:** `vite build` y `vite preview --host 0.0.0.0 --port 5173`, publicado en `127.0.0.1:55173`.
   `vite preview` escribe en `node_modules/.vite-temp` al arrancar: esa carpeta se crea en la imagen con
   dueño `node` (sin eso, el contenedor fallaba con EACCES).
 - **Arranque:** las apps arrancan con `node` + `tsx` directamente (no `pnpm start`), para que las

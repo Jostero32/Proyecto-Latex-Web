@@ -151,7 +151,7 @@ describe('documentación de la API', () => {
 // Regresión de una carrera: get() leía el job y después su estado; si el job terminaba entre las dos
 // lecturas, informaba 'completed' sin resultado y la API respondía un 'failed' falso.
 describe('cola de BullMQ con Redis real', () => {
-  const REDIS_URL = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
+  const REDIS_URL = process.env.REDIS_URL ?? 'redis://127.0.0.1:56379';
   const name = `compile-test-${randomUUID()}`;
   let connection: Redis;
   let workerConnection: Redis;

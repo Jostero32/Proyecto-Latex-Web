@@ -4,7 +4,7 @@ import pg from 'pg';
 import { closeDb, createDb, migrateDb } from '../src/db';
 import { testStorage } from './helpers';
 
-const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgresql://latexweb:latexweb@127.0.0.1:5432/latexweb';
+const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgresql://latexweb:latexweb@127.0.0.1:55432/latexweb';
 const TEST_DB = 'latexweb_test';
 const HINT = 'Levantar la infraestructura: docker compose up -d postgres redis minio';
 

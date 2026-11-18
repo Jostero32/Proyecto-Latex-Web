@@ -40,9 +40,9 @@ const MB = 1024 * 1024;
 
 export function loadConfig(env: Env = process.env): CompilerConfig {
   return {
-    redisUrl: env.REDIS_URL ?? 'redis://127.0.0.1:6379',
+    redisUrl: env.REDIS_URL ?? 'redis://127.0.0.1:56379',
     storage: {
-      endpoint: env.S3_ENDPOINT ?? 'http://127.0.0.1:9000',
+      endpoint: env.S3_ENDPOINT ?? 'http://127.0.0.1:59000',
       region: env.S3_REGION ?? 'us-east-1',
       accessKey: env.S3_ACCESS_KEY ?? 'latexweb',
       secretKey: env.S3_SECRET_KEY ?? 'latexweb-dev-secret',

@@ -32,9 +32,9 @@ export function loadConfig(env: Env = process.env): ServerConfig {
     // Por defecto solo localhost. En docker compose es 0.0.0.0 dentro del contenedor, y compose lo
     // publica solo en 127.0.0.1 del host (ver docs/specs/docker-compose.md).
     host: env.SERVER_HOST === undefined || env.SERVER_HOST === '' ? '127.0.0.1' : env.SERVER_HOST,
-    port: envPositiveInteger(env, 'SERVER_PORT', 3000),
-    redisUrl: env.REDIS_URL ?? 'redis://127.0.0.1:6379',
-    databaseUrl: env.DATABASE_URL ?? 'postgresql://latexweb:latexweb@127.0.0.1:5432/latexweb',
+    port: envPositiveInteger(env, 'SERVER_PORT', 53000),
+    redisUrl: env.REDIS_URL ?? 'redis://127.0.0.1:56379',
+    databaseUrl: env.DATABASE_URL ?? 'postgresql://latexweb:latexweb@127.0.0.1:55432/latexweb',
     cookieSecure: env.COOKIE_SECURE === 'true',
     requestTimeoutMs: envPositiveInteger(env, 'SERVER_REQUEST_TIMEOUT_MS', 120_000),
     security: {
@@ -42,7 +42,7 @@ export function loadConfig(env: Env = process.env): ServerConfig {
       allowedHosts: list(env.ALLOWED_HOSTS) ?? DEFAULT_ALLOWED_HOSTS,
     },
     storage: {
-      endpoint: env.S3_ENDPOINT ?? 'http://127.0.0.1:9000',
+      endpoint: env.S3_ENDPOINT ?? 'http://127.0.0.1:59000',
       region: env.S3_REGION ?? 'us-east-1',
       accessKey: env.S3_ACCESS_KEY ?? 'latexweb',
       secretKey: env.S3_SECRET_KEY ?? 'latexweb-dev-secret',

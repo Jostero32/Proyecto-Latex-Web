@@ -23,7 +23,7 @@ describe('guardas de Host y Origin', () => {
   });
 
   it('acepta los hosts locales con puerto', async () => {
-    for (const host of ['127.0.0.1:3000', 'localhost:3000', '[::1]:3000']) {
+    for (const host of ['127.0.0.1:53000', 'localhost:53000', '[::1]:53000']) {
       expect((await app.inject({ method: 'GET', url: '/api/health', headers: { host } })).statusCode).toBe(200);
     }
   });
@@ -32,22 +32,22 @@ describe('guardas de Host y Origin', () => {
     const post = (origin?: string) => app.inject({ method: 'POST', url: '/echo', headers: origin ? { origin } : {} });
     expect((await post('http://evil.com')).json()).toMatchObject({ error: 'forbidden_origin' });
     expect((await post('null')).statusCode).toBe(403);
-    expect((await post('http://localhost:5173')).statusCode).toBe(200);
+    expect((await post('http://localhost:55173')).statusCode).toBe(200);
     expect((await post()).statusCode).toBe(200);
     const get = await app.inject({ method: 'GET', url: '/api/health', headers: { origin: 'http://evil.com' } });
     expect(get.statusCode).toBe(200);
   });
 
   it('acepta el mismo origen que el server (Swagger UI en /api/docs), pero no otro puerto', async () => {
-    const post = (origin: string) => app.inject({ method: 'POST', url: '/echo', headers: { host: '127.0.0.1:3000', origin } });
-    expect((await post('http://127.0.0.1:3000')).statusCode).toBe(200);
+    const post = (origin: string) => app.inject({ method: 'POST', url: '/echo', headers: { host: '127.0.0.1:53000', origin } });
+    expect((await post('http://127.0.0.1:53000')).statusCode).toBe(200);
     expect((await post('http://127.0.0.1:4000')).statusCode).toBe(403);
   });
 
   it('usa la configuración propia en lugar de los valores por defecto', async () => {
     const custom = await buildApp({ security: { allowedOrigins: ['https://app.ejemplo.com'], allowedHosts: ['app.ejemplo.com'] } });
     try {
-      expect((await custom.inject({ method: 'GET', url: '/api/health', headers: { host: '127.0.0.1:3000' } })).statusCode).toBe(403);
+      expect((await custom.inject({ method: 'GET', url: '/api/health', headers: { host: '127.0.0.1:53000' } })).statusCode).toBe(403);
       expect((await custom.inject({ method: 'GET', url: '/api/health', headers: { host: 'app.ejemplo.com' } })).statusCode).toBe(200);
     } finally {
       await custom.close();
@@ -55,8 +55,8 @@ describe('guardas de Host y Origin', () => {
   });
 
   it.each<[string | undefined, string | null]>([
-    ['LOCALHOST:5173', 'localhost'],
-    ['[::1]:3000', '[::1]'],
+    ['LOCALHOST:55173', 'localhost'],
+    ['[::1]:53000', '[::1]'],
     ['[::1]x', null],
     ['host:99999999', null],
     ['a b', null],
@@ -66,9 +66,9 @@ describe('guardas de Host y Origin', () => {
   });
 
   it('el Origin se compara exacto, sin barra final ni mayúsculas', () => {
-    const options = { allowedOrigins: ['http://localhost:5173'], allowedHosts: [] };
-    expect(isAllowedOrigin('HTTP://LOCALHOST:5173/', options)).toBe(true);
-    expect(isAllowedOrigin('http://localhost:5174', options)).toBe(false);
-    expect(isAllowedOrigin('http://localhost:5173.evil.com', options)).toBe(false);
+    const options = { allowedOrigins: ['http://localhost:55173'], allowedHosts: [] };
+    expect(isAllowedOrigin('HTTP://LOCALHOST:55173/', options)).toBe(true);
+    expect(isAllowedOrigin('http://localhost:55174', options)).toBe(false);
+    expect(isAllowedOrigin('http://localhost:55173.evil.com', options)).toBe(false);
   });
 });

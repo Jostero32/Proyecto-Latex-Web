@@ -28,7 +28,7 @@ const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url));
 const CANARY = 'LATEXWEB_CANARY';
 const TEST_TIMEOUT_MS = 180_000;
 const S3: StorageConfig = {
-  endpoint: process.env.S3_ENDPOINT ?? 'http://127.0.0.1:9000',
+  endpoint: process.env.S3_ENDPOINT ?? 'http://127.0.0.1:59000',
   region: 'us-east-1',
   accessKey: process.env.S3_ACCESS_KEY ?? 'latexweb',
   secretKey: process.env.S3_SECRET_KEY ?? 'latexweb-dev-secret',

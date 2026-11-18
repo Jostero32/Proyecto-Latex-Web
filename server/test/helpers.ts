@@ -11,7 +11,7 @@ import type { ProjectLimits } from '../src/features/files/service';
 import type { CompileJobData } from '@latexweb/shared';
 import { createStorage, type Storage } from '../src/storage';
 
-export const ORIGIN = 'http://localhost:5173';
+export const ORIGIN = 'http://localhost:55173';
 export const TEST_BUCKET = 'latexweb-test';
 
 export function testDb(): Db {
@@ -22,7 +22,7 @@ export function testDb(): Db {
 
 export function testStorage(): Storage {
   return createStorage({
-    endpoint: process.env.S3_ENDPOINT ?? 'http://127.0.0.1:9000',
+    endpoint: process.env.S3_ENDPOINT ?? 'http://127.0.0.1:59000',
     region: 'us-east-1',
     accessKey: process.env.S3_ACCESS_KEY ?? 'latexweb',
     secretKey: process.env.S3_SECRET_KEY ?? 'latexweb-dev-secret',
