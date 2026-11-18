@@ -3,6 +3,10 @@
 > **Cambio posterior** (`backend.md`, paso 1): Prisma se reemplazó por Drizzle (`server/src/schema.ts`,
 > tablas `users` y `sessions`, migraciones al arrancar, sin servicio `migrate`) y las rutas pasaron a `/api/auth/*`.
 
+> **Rutas viejas:** esta spec es anterior a la estructura plana (`backend.md`, paso 1). `apps/server` es hoy
+> `server/`, `apps/compiler` es `compiler/`, `apps/compiler/docker` es `compiler/texlive/`, `apps/web` es `web/` y
+> `packages/shared` es `shared/`.
+
 ## 1. Objetivo
 Cuentas de usuario con registro, login y logout, y sesiones en cookies httpOnly. Monta la base de datos
 (Prisma + Postgres) para todo el proyecto. Es la base de `proyectos-y-archivos`, permisos y colaboración.

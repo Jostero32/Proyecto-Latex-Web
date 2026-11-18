@@ -1,5 +1,9 @@
 # Spec: apps en docker compose
 
+> **Rutas viejas:** esta spec es anterior a la estructura plana (`backend.md`, paso 1). `apps/server` es hoy
+> `server/`, `apps/compiler` es `compiler/`, `apps/compiler/docker` es `compiler/texlive/`, `apps/web` es `web/` y
+> `packages/shared` es `shared/`.
+
 ## 1. Objetivo
 Poder levantar todo el sistema (infraestructura, `server`, `compiler` y `web`) con docker compose, sin
 instalar Node ni pnpm en el host. Hoy compose levanta solo la infraestructura y las apps corren en el host
@@ -74,6 +78,12 @@ Verificado en Docker 29.5.3 (API 1.54) con todos los flags del sandbox:
 - **`apps/server/src/config.ts`:** `SERVER_HOST`, por defecto `127.0.0.1`.
 
 ### Imágenes (`Dockerfile` en la raíz)
+> **Cambio posterior (2026-11-18):** el `Dockerfile` de la raíz con tres targets se separó en
+> `server/Dockerfile`, `compiler/Dockerfile` y `web/Dockerfile`, uno por app. El contexto sigue siendo la
+> raíz, porque el lockfile y `shared/` son del workspace (`build: { context: ., dockerfile: server/Dockerfile }`).
+> Lo que entra al contexto lo decide un `Dockerfile.dockerignore` al lado de cada uno, que deja pasar solo
+> lo que usa esa imagen; ya no hay `.dockerignore` en la raíz. Las imágenes y los flags no cambiaron.
+
 - **Base:** `node:22-bookworm-slim` fijada por digest, con corepack y pnpm `12.18.0`, el mismo que
   `packageManager`.
   - Instala con `pnpm install --frozen-lockfile`; sin build: las apps corren con `tsx`, igual que en

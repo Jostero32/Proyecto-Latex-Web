@@ -1,0 +1,12 @@
+# Contexto de server/Dockerfile (la raíz del repo): solo entra lo que usa la imagen.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.base.json
+!*/package.json
+!shared/src
+!shared/tsconfig.json
+!server/tsconfig.json
+!server/src
+!server/drizzle

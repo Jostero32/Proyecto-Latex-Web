@@ -1,5 +1,9 @@
 # Spec: estructura del monorepo
 
+> **Rutas viejas:** esta spec es anterior a la estructura plana (`backend.md`, paso 1). `apps/server` es hoy
+> `server/`, `apps/compiler` es `compiler/`, `apps/compiler/docker` es `compiler/texlive/`, `apps/web` es `web/` y
+> `packages/shared` es `shared/`.
+
 ## 1. Objetivo
 Crear el esqueleto del proyecto (monorepo pnpm, apps vacías, servicios de infraestructura y herramientas de
 calidad) para que las funcionalidades futuras se desarrollen sobre una base común y verificable.

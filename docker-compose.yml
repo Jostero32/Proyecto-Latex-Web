@@ -90,7 +90,7 @@ services:
     <<: *hardening
     build:
       context: .
-      target: server
+      dockerfile: server/Dockerfile
     image: latexweb-server:dev
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=64m
@@ -130,7 +130,7 @@ services:
     <<: *hardening
     build:
       context: .
-      target: compiler
+      dockerfile: compiler/Dockerfile
     image: latexweb-compiler:dev
     # Root dentro del contenedor (por el socket), pero solo con las capacidades que usa: crear y
     # entregar al uid de las compilaciones las carpetas de salida en su volumen de trabajo.
@@ -181,7 +181,7 @@ services:
     <<: *hardening
     build:
       context: .
-      target: web
+      dockerfile: web/Dockerfile
     image: latexweb-web:dev
     environment:
       # vite preview reenvía /api y /collab al server (un solo origen para el navegador).

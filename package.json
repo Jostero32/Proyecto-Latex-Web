@@ -7,8 +7,8 @@
   },
   "scripts": {
     "dev": "pnpm -r --parallel dev",
-    "test": "vitest run",
-    "test:compile": "vitest run --config vitest.compile.config.ts",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "test:compile": "pnpm --filter @latexweb/compiler test:compile",
     "lint": "eslint .",
     "typecheck": "pnpm -r typecheck",
     "db:generate": "pnpm --filter @latexweb/server db:generate"

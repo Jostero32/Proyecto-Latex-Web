@@ -21,8 +21,9 @@ visual sobre el mismo documento. Plan y estado: `docs/roadmap.md`.
 - Toda la app en contenedores: `docker compose up -d --build`
   (el servicio compiler monta el socket de Docker: solo para uso local)
 - Dev con hot reload: `docker compose up -d postgres redis minio` y después `pnpm dev` (lee `.env` si existe)
-- Tests (con postgres, redis y minio levantados): `pnpm test`
+- Tests (con postgres, redis y minio levantados): `pnpm test` (corre el `test` de cada app, una a la vez)
 - Tests de compilación real con Docker y TeX Live (lentos): `pnpm test:compile`
+  (`vitest run --mode compile` en compiler)
 - Lint y tipos: `pnpm lint && pnpm typecheck`
 - Base de datos: cambiar `server/src/schema.ts` y generar la migración con `pnpm db:generate`.
   El server aplica las migraciones pendientes al arrancar.
@@ -30,6 +31,11 @@ visual sobre el mismo documento. Plan y estado: `docs/roadmap.md`.
 ## Estructura de carpetas
 Plana: una carpeta por app en la raíz (`server/`, `compiler/`, `web/`, `shared/`) y `docs/`. Una carpeta
 nueva solo cuando agrupa varios archivos; si va a tener uno, es un archivo.
+
+En la raíz solo queda lo del workspace (`package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`,
+`tsconfig.base.json`, `eslint.config.js` y el `node_modules/` de pnpm), `docker-compose.yml`, `.env.example`,
+`README.md` y este archivo. Lo de cada app va en su carpeta: `Dockerfile` (contexto: la raíz) con su
+`Dockerfile.dockerignore`, `vitest.config.ts` y `tsconfig.json`.
 
 ```
 server/
@@ -46,14 +52,17 @@ server/
                     (auth, projects, files, sharing, collab, compile)
   drizzle/          migraciones SQL generadas
   test/             tests del server
+  Dockerfile        imagen del server (y Dockerfile.dockerignore)
 compiler/
   texlive/          imagen de TeX Live de las compilaciones
   src/              index.ts, config.ts, processor.ts, docker.ts, workspace.ts, storage.ts, log.ts
   test/             tests del compiler; test/fixtures/ con los proyectos LaTeX de prueba
+  Dockerfile        imagen del worker (y Dockerfile.dockerignore)
 web/
   src/              main.tsx, index.css (tokens de Pliego para Tailwind), app/ (router, tema), lib/ (cliente de
                     la API, formatos, pistas del log), components/ (UI genérica), features/<f>/ (páginas,
                     componentes y hooks de cada feature)
+  Dockerfile        build de Vite y `vite preview` (y Dockerfile.dockerignore)
 shared/src/         api/ (contratos por feature) y utilidades puras (project-paths, env)
 ```
 

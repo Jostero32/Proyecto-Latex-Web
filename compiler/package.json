@@ -7,7 +7,9 @@
     "dev": "tsx watch --env-file-if-exists=../.env src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "image:build": "docker build -t latexweb-texlive:tl2026-2 texlive"
+    "image:build": "docker build -t latexweb-texlive:tl2026-2 texlive",
+    "test": "vitest run",
+    "test:compile": "vitest run --mode compile"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1169.0",

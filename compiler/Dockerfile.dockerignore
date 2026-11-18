@@ -1,0 +1,12 @@
+# Contexto de compiler/Dockerfile (la raíz del repo): solo entra lo que usa la imagen. La imagen de
+# TeX Live (compiler/texlive) tiene su propio contexto.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.base.json
+!*/package.json
+!shared/src
+!shared/tsconfig.json
+!compiler/tsconfig.json
+!compiler/src

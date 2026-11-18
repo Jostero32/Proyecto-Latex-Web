@@ -1,0 +1,13 @@
+# Contexto de web/Dockerfile (la raíz del repo): solo entra lo que usa la imagen.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.base.json
+!*/package.json
+!shared/src
+!shared/tsconfig.json
+!web/index.html
+!web/tsconfig.json
+!web/vite.config.ts
+!web/src

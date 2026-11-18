@@ -22,6 +22,10 @@ Pendientes menores y hallazgos de seguridad: `docs/backlog.md`.
 - **Estructura plana:** `server/`, `compiler/`, `web/`, `shared/` y `docs/` en la raíz, sin `apps/` ni
   `packages/`. Con 4 paquetes, ese nivel extra no agrupa nada. Las carpetas internas existen solo si
   agrupan varios archivos.
+- **Monorepo y no proyectos independientes** (2026-11-18): `shared/` (contratos y validación de rutas, que
+  es de seguridad) tiene que ser el mismo en server, compiler y web; separarlos obligaría a copiarlo o a
+  sincronizar tres lockfiles. La raíz guarda solo lo del workspace; `Dockerfile`, `vitest.config.ts` y
+  `tsconfig.json` van en cada app.
 - **Tests en `<app>/test/`**, uno por feature de punta a punta contra la infraestructura real, y unitarios
   solo para lógica de seguridad. Antes había tantas líneas de test como de código, con un paso chico por
   cada pieza.

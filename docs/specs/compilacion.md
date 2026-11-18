@@ -1,5 +1,9 @@
 # Spec: compilación (v1)
 
+> **Rutas viejas:** esta spec es anterior a la estructura plana (`backend.md`, paso 1). `apps/server` es hoy
+> `server/`, `apps/compiler` es `compiler/`, `apps/compiler/docker` es `compiler/texlive/`, `apps/web` es `web/` y
+> `packages/shared` es `shared/`.
+
 ## 1. Objetivo
 Compilar un proyecto LaTeX enviado por HTTP en un sandbox seguro y permitir consultar el estado del trabajo y
 descargar el PDF y el log. Es el núcleo del producto y la base sobre la que después se montan usuarios,
