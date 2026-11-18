@@ -102,9 +102,11 @@ export function isIgnoredPath(path: string): boolean {
   return segments.some((segment) => segment.startsWith('.')) || fileName.toLowerCase() === 'latexmkrc';
 }
 
-// Solo ASCII, sin espacios ni metacaracteres de shell, y ningún segmento empieza con `-`:
-// latexmk interpola este nombre en comandos de /bin/sh y un `-e…` se tomaría como opción.
-const MAIN_FILE_PATTERN = /^(?:[A-Za-z0-9_][A-Za-z0-9_-]*\/)*[A-Za-z0-9_][A-Za-z0-9._-]*\.tex$/;
+// Solo ASCII y sin metacaracteres de shell: latexmk interpola este nombre en comandos de /bin/sh (entre
+// comillas dobles). Ningún segmento empieza con `-` (se tomaría como opción). Se admiten espacios simples
+// dentro de un nombre (`Anexo 2.tex`), siempre seguidos de una letra, un dígito o `_`: nunca al
+// principio, al final, dobles ni delante de `-` o `.`.
+const MAIN_FILE_PATTERN = /^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]| (?=[A-Za-z0-9_]))*\/)*[A-Za-z0-9_](?:[A-Za-z0-9._-]| (?=[A-Za-z0-9_]))*\.tex$/;
 
 /** Valida el documento principal. Se usa en la API y otra vez en el worker antes de armar los argumentos. */
 export function isValidMainFile(path: string): boolean {

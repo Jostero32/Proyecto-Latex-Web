@@ -183,7 +183,7 @@ describe('isIgnoredPath', () => {
 });
 
 describe('isValidMainFile', () => {
-  it.each(['main.tex', 'tesis/main.tex', 'cap_1/doc-v2.tex', 'a.b.tex', '_x.tex', '1.tex'])(
+  it.each(['main.tex', 'tesis/main.tex', 'cap_1/doc-v2.tex', 'a.b.tex', '_x.tex', '1.tex', 'Anexo 2.tex', 'mi tesis/Anexo 2 final.tex'])(
     'acepta %s',
     (input) => {
       expect(isValidMainFile(input)).toBe(true);
@@ -198,7 +198,12 @@ describe('isValidMainFile', () => {
     'x$y.tex',
     'a`b.tex',
     'a;b.tex',
-    'mi doc.tex',
+    ' main.tex',
+    'mi  doc.tex',
+    'mi -e.tex',
+    'mi .tex',
+    'mi /main.tex',
+    'mi\tdoc.tex',
     'capítulo.tex',
     'main.TEX',
     'main.Tex',

@@ -109,6 +109,8 @@ interface PdfViewProps {
   pdf: LoadedPdf;
   /** Píxeles CSS por punto del PDF. */
   scale: number;
+  /** Ancho disponible al ajustar: una página más ancha (apaisada) se achica a ese ancho. */
+  maxWidth: number | null;
   dimmed: boolean;
   /** Bloques marcados por SyncTeX; `key` cambia en cada búsqueda (para volver a llevarlos a la vista). */
   highlight: { rects: SyncRect[]; key: number } | null;
@@ -119,10 +121,11 @@ interface PdfViewProps {
   onPoint: (page: number, x: number, y: number) => void;
 }
 
-export function PdfView({ ref, pdf, scale, dimmed, highlight, clickable, onViewport, onPage, onPoint }: PdfViewProps) {
+export function PdfView({ ref, pdf, scale, maxWidth, dimmed, highlight, clickable, onViewport, onPage, onPoint }: PdfViewProps) {
   const pages = useRef<(HTMLDivElement | null)[]>([]);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const lastPage = useRef(0);
+  const scaleOf = (size: PageSize) => (maxWidth ? Math.min(scale, maxWidth / size.width) : scale);
 
   useImperativeHandle(ref, () => ({
     scrollToPage: (page) => pages.current[page - 1]?.scrollIntoView({ block: 'start' }),
@@ -171,8 +174,9 @@ export function PdfView({ ref, pdf, scale, dimmed, highlight, clickable, onViewp
     const first = highlight?.rects[0];
     const element = root;
     const page = first ? pages.current[first.page - 1] : null;
-    if (!first || !element || !page) return;
-    element.scrollTo({ top: page.offsetTop + first.y * scale - element.clientHeight / 3, behavior: 'smooth' });
+    const size = first ? pdf.sizes[first.page - 1] : undefined;
+    if (!first || !element || !page || !size) return;
+    element.scrollTo({ top: page.offsetTop + first.y * scaleOf(size) - element.clientHeight / 3, behavior: 'smooth' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlight?.key]);
 
@@ -192,7 +196,7 @@ export function PdfView({ ref, pdf, scale, dimmed, highlight, clickable, onViewp
             pdf={pdf}
             index={index}
             size={size}
-            scale={scale}
+            scale={scaleOf(size)}
             root={root}
             rects={highlight?.rects.filter((rect) => rect.page === index + 1) ?? []}
             clickable={clickable}

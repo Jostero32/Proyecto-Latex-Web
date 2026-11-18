@@ -125,6 +125,7 @@ export function PdfPane(props: PdfPaneProps) {
             ref={view}
             pdf={loaded}
             scale={scale}
+            maxWidth={fitted !== null ? viewport.width : null}
             dimmed={failedNow}
             highlight={highlight}
             clickable={canSync}

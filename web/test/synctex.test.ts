@@ -22,6 +22,8 @@ const SAMPLE = [
   '!120',
   '{1',
   `[1,12:${sp(72)},${sp(770)}:${sp(450)},${sp(700)},0`,
+  // Un punto suelto entre párrafos (línea 5, sin renglón): no sirve para marcar.
+  `x1,5:${sp(72)},${sp(80)}`,
   `(1,12:${sp(72)},${sp(100)}:${sp(450)},${sp(8)},${sp(2)}`,
   `g1,10:${sp(72)},${sp(100)}`,
   `x1,11:${sp(300)},${sp(100)}`,
@@ -52,6 +54,8 @@ describe('SyncTeX', () => {
     expect(rect?.height).toBeCloseTo(10);
     expect(forwardSearch(sync, 'cap/intro.tex', 1)[0]?.y).toBeCloseTo(122);
     expect(forwardSearch(sync, 'intro.tex', 1)).toEqual([]);
+    // Desde el preámbulo (sin nada en el PDF): el primer renglón que sí está.
+    expect(forwardSearch(sync, 'main.tex', 2)[0]?.y).toBeCloseTo(92);
   });
 
   it('PDF → código: el pedazo más cercano a la izquierda del clic, dentro del renglón', () => {

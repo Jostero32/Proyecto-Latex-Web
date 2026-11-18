@@ -127,22 +127,26 @@ export function parseSynctex(text: string, projectPaths: readonly string[], main
 export function forwardSearch(sync: SyncTex, path: string, line: number): SyncRect[] {
   const tags = new Set([...sync.files].filter(([, file]) => file === path).map(([tag]) => tag));
   if (tags.size === 0) return [];
-  const ofFile = sync.nodes.filter((node) => tags.has(node.tag) && node.line > 0);
-  if (ofFile.length === 0) return [];
-  // La línea exacta, o la más cercana (en empate, la de abajo: el texto suele seguir ahí).
-  let best = ofFile[0]?.line ?? line;
-  for (const node of ofFile) {
-    const distance = Math.abs(node.line - line);
-    const current = Math.abs(best - line);
-    if (distance < current || (distance === current && node.line > best)) best = node.line;
-  }
-  const boxes = new Set<number>();
+  // Por línea, los renglones (cajas con ancho) que tienen algo de ella. Hay líneas que solo dejan puntos
+  // sueltos entre párrafos (sin renglón que marcar): esas no cuentan.
+  const byLine = new Map<number, Set<number>>();
   sync.nodes.forEach((node, index) => {
-    if (!tags.has(node.tag) || node.line !== best) return;
+    if (!tags.has(node.tag) || node.line <= 0) return;
     const box = node.box ? index : node.parent;
-    if (box >= 0) boxes.add(box);
+    if (box < 0 || (sync.nodes[box]?.width ?? 0) <= 0) return;
+    const boxes = byLine.get(node.line) ?? new Set<number>();
+    boxes.add(box);
+    byLine.set(node.line, boxes);
   });
-  const rects = [...boxes].map((index) => rectOf(sync.nodes[index] as SyncNode)).filter((rect) => rect.width > 0);
+  // La línea exacta, o la más cercana que tenga renglones (en empate, la de abajo: el texto sigue ahí).
+  let best: number | null = null;
+  for (const candidate of byLine.keys()) {
+    const distance = Math.abs(candidate - line);
+    const current = best === null ? Infinity : Math.abs(best - line);
+    if (distance < current || (distance === current && best !== null && candidate > best)) best = candidate;
+  }
+  if (best === null) return [];
+  const rects = [...(byLine.get(best) ?? [])].map((index) => rectOf(sync.nodes[index] as SyncNode));
   // Solo la primera página donde aparece: es la que se muestra.
   const page = Math.min(...rects.map((rect) => rect.page));
   return rects.filter((rect) => rect.page === page);

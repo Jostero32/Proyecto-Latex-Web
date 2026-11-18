@@ -137,6 +137,15 @@ describe('archivos', () => {
 });
 
 describe('zip', () => {
+  it('elige como principal la tesis (aunque tenga espacios), no una figura standalone suelta', async () => {
+    const zip = await makeZip([
+      { name: 'arbol_problemas.tex', data: '\\documentclass[tikz]{standalone}\n\\begin{document}x\\end{document}' },
+      { name: 'Anexo 2.tex', data: '\\documentclass[12pt]{article}\n\\begin{document}\nTesis larga.\n\\end{document}' },
+    ]);
+    const imported = await ana.upload('/api/projects/import', { 'Anexo 2.zip': zip });
+    expect(imported.json<{ project: ProjectSummary }>().project.mainFile).toBe('Anexo 2.tex');
+  });
+
   it('importar y exportar conserva rutas, texto y binarios', async () => {
     const zip = await makeZip([
       { name: 'informe/tesis.tex', data: '% !TEX program = lualatex\n\\documentclass{book}' },

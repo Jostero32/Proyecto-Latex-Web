@@ -55,9 +55,12 @@ done
 [ -n "$main" ] || fail "falta el documento principal"
 
 # Mismo criterio que isValidMainFile (shared/src/project-paths.ts): ASCII sin
-# metacaracteres de shell, ningún segmento empieza con '-' o '.', y termina en .tex.
+# metacaracteres de shell, ningún segmento empieza con '-' o '.', y termina en .tex. Espacios simples
+# dentro de un nombre, nunca al principio o al final de un segmento, dobles ni delante de '-' o '.'.
 case "$main" in
-  *[!A-Za-z0-9._/-]* | -* | */-* | .* | */.* | /* | *//* | */) fail "documento principal inválido: '$main'" ;;
+  *[!A-Za-z0-9._/\ -]* | -* | */-* | .* | */.* | /* | *//* | */ | ' '* | */' '* | *' /'* | *'  '* | *' -'* | *' .'*)
+    fail "documento principal inválido: '$main'"
+    ;;
   *.tex) ;;
   *) fail "el documento principal debe terminar en .tex: '$main'" ;;
 esac

@@ -17,6 +17,7 @@ momento (CLAUDE.md, "Forma de trabajo"). Ordenado por prioridad dentro de cada s
 | media | compilación | **Sin límite de compilaciones por usuario:** solo hay un tope global de la cola (`COMPILE_MAX_QUEUED`); un usuario puede llenarla. Rate limit por usuario (cuotas, spec `cierre`). |
 | media | colaboración | **Sin tope de conexiones WebSocket por usuario:** cada una puede abrir documentos de sus proyectos y ocupar memoria. Limitar por usuario e IP. |
 | baja | api | Swagger UI está encendido por defecto (`API_DOCS`): en despliegue, apagarlo o dejarlo detrás de auth (spec `cierre`). |
+| baja | proyectos | Un zip exportado de otro editor trae lo que dejó su compilación (`.aux`, `.bbl`, `.log`, `.synctex.gz`, `*-SAVE-ERROR`…): ocupa cuota y ensucia el árbol. Ignorarlo al importar, como `.git`. |
 | baja | web | El visor del PDF no tiene capa de texto ni enlaces: no se puede seleccionar texto ni seguir `\ref` o `\href` dentro del PDF. |
 | baja | web | Falta el minimapa opcional del editor que pide el diseño (CodeMirror no lo trae; hay un paquete aparte). |
 | baja | web | El color de cada persona sale de su id (igual en todos los navegadores); dos personas pueden coincidir en el color. El nombre siempre acompaña. |

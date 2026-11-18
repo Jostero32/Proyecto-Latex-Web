@@ -212,14 +212,24 @@ export function createProjectsService({ db, storage, docs, limits }: ProjectsDep
   return service;
 }
 
-/** `main.tex` si existe; si no, el primer .tex con `\documentclass`, prefiriendo los de menos profundidad. */
+/**
+ * `main.tex` si existe; si no, un .tex con `\documentclass`: primero los que no son figuras sueltas
+ * (clase `standalone`), después los de menos profundidad y, entre esos, el más largo (una tesis suele
+ * venir con figuras TikZ compilables por separado al lado del documento).
+ */
 function pickMainFile(prepared: readonly { id: string; path: string; text?: string }[]) {
-  const candidates = prepared
-    .filter((f) => f.text !== undefined && isValidMainFile(f.path))
-    .sort((a, b) => a.path.split('/').length - b.path.split('/').length || a.path.localeCompare(b.path));
-  return (
-    candidates.find((f) => f.path === DEFAULT_MAIN_FILE) ??
-    candidates.find((f) => /^[^%\n]*\\documentclass/m.test(f.text ?? '')) ??
-    undefined
-  );
+  const documents = prepared.filter((f) => f.text !== undefined && isValidMainFile(f.path));
+  const main = documents.find((f) => f.path === DEFAULT_MAIN_FILE);
+  if (main) return main;
+  const depth = (path: string) => path.split('/').length;
+  const standalone = (text: string) => (/^[^%\n]*\\documentclass(?:\[[^\]]*\])?\{standalone\}/m.test(text) ? 1 : 0);
+  return documents
+    .filter((f) => /^[^%\n]*\\documentclass/m.test(f.text ?? ''))
+    .sort(
+      (a, b) =>
+        standalone(a.text ?? '') - standalone(b.text ?? '') ||
+        depth(a.path) - depth(b.path) ||
+        (b.text?.length ?? 0) - (a.text?.length ?? 0) ||
+        a.path.localeCompare(b.path),
+    )[0];
 }

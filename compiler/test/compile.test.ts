@@ -79,7 +79,7 @@ describe('compilación real de proyectos', () => {
   /** Sube el proyecto como lo haría el server y lo compila con el processor del worker. */
   async function compile(
     source: { fixture: string } | { files: Record<string, string> },
-    options: { engine?: Engine; timeoutSeconds?: number } = {},
+    options: { engine?: Engine; timeoutSeconds?: number; mainFile?: string } = {},
   ): Promise<Compiled> {
     const id = randomUUID();
     const files: Record<string, Buffer> = {};
@@ -95,7 +95,8 @@ describe('compilación real de proyectos', () => {
     }
     for (const [path, data] of Object.entries(files)) await storage.put(compilationInputPrefix(id) + path, data);
 
-    const engine = options.engine ?? detectEngineFromSource(files['main.tex']?.toString('utf8') ?? '') ?? DEFAULT_ENGINE;
+    const mainFile = options.mainFile ?? 'main.tex';
+    const engine = options.engine ?? detectEngineFromSource(files[mainFile]?.toString('utf8') ?? '') ?? DEFAULT_ENGINE;
     const processor = createCompileProcessor({
       workspace: createLocalWorkspace({ root, maxPdfBytes: 50 * 1024 * 1024, maxLogBytes: 5 * 1024 * 1024, containerUser: resolveContainerUser() }),
       storage,
@@ -110,7 +111,7 @@ describe('compilación real de proyectos', () => {
       maxInputBytes: 200 * 1024 * 1024,
       maxInputFiles: 500,
     });
-    const result = await processor({ id, data: { compilationId: id, engine, mainFile: 'main.tex' } });
+    const result = await processor({ id, data: { compilationId: id, engine, mainFile } });
     const pdf = result.hasPdf ? await storage.getBuffer(compilationArtifactKey(id, 'pdf')) : null;
     const log = result.hasLog ? (await storage.getBuffer(compilationArtifactKey(id, 'log'))).toString('latin1') : '';
     return { ...result, id, pdfHeader: pdf ? pdf.subarray(0, 5).toString('latin1') : '', log };
@@ -128,6 +129,20 @@ describe('compilación real de proyectos', () => {
     },
     TEST_TIMEOUT_MS,
   );
+
+  it('un documento principal con espacios (y una carpeta con espacios en \\input) compila', async () => {
+    const result = await compile(
+      {
+        files: {
+          'Anexo 2.tex': '\\documentclass{article}\n\\begin{document}\nTesis con espacio.\n\\input{cap dos/parte}\n\\end{document}\n',
+          'cap dos/parte.tex': 'Parte incluida.\n',
+        },
+      },
+      { mainFile: 'Anexo 2.tex' },
+    );
+    expect(result.outcome, result.log.slice(-2000)).toBe('success');
+    expect(result.hasSynctex).toBe(true);
+  }, TEST_TIMEOUT_MS);
 
   it('articulo-simple resuelve las referencias cruzadas y con-bibliografia, las citas', async () => {
     expect((await compile({ fixture: 'articulo-simple' })).log).not.toContain('There were undefined references');

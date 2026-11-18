@@ -66,9 +66,11 @@ worker es `apps/compiler`, un proceso aparte.
   carpeta (`a` y `a/b`).
 - `isIgnoredPath`: un segmento que empieza por `.` o un archivo llamado `latexmkrc` en cualquier nivel.
   Se ignoran (no se rechazan) y se informan en `ignoredFiles`. Lo que protege de verdad es `-norc`.
-- `isValidMainFile`: patrón estricto `^(?:[A-Za-z0-9_][A-Za-z0-9_-]*/)*[A-Za-z0-9_][A-Za-z0-9._-]*\.tex$`
-  (ASCII, sin espacios y sin `-` al principio), porque latexmk arma comandos de `/bin/sh` con este nombre y
-  un nombre como `-e…` se toma como opción. Por defecto es `main.tex` y tiene que estar entre los archivos
+- `isValidMainFile`: patrón estricto, ASCII y sin `-` al principio de un segmento, porque latexmk arma
+  comandos de `/bin/sh` con este nombre (entre comillas dobles) y un nombre como `-e…` se toma como opción.
+  Desde 2026-11-18 admite espacios simples dentro de un nombre (`Anexo 2.tex`, habitual en tesis), siempre
+  seguidos de letra, dígito o `_`: entre comillas dobles un espacio no es especial, y el dólar, las
+  comillas, la barra invertida y el acento grave siguen prohibidos. El script del contenedor repite la regla. Por defecto es `main.tex` y tiene que estar entre los archivos
   subidos.
 - `detectEngineFromSource`: lee como máximo las primeras 50 líneas que sean comentarios o estén en blanco,
   ignorando el BOM, y busca `/^%\s*!\s*TeX\s+(?:TS-)?program\s*=\s*([A-Za-z]+)\s*$/i`. Un valor fuera de
