@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "titulo": "Pliego · editor LaTeX colaborativo",
+  "resumen": "Editor LaTeX web al estilo de Overleaf: proyectos con imágenes, compilación a PDF en contenedores aislados, colaboración en tiempo real con cursores y SyncTeX en ambos sentidos.",
+  "categorias": ["fullstack"],
+  "stack": ["TypeScript", "React", "Vite", "Fastify", "Yjs", "Hocuspocus", "PostgreSQL", "Drizzle", "Redis", "BullMQ", "MinIO", "Docker", "TeX Live"],
+  "estado": "En desarrollo activo",
+  "destacado": true,
+  "anio": 2026,
+  "rol": "Diseño y desarrollo completo",
+  "portada": "docs/img/editor.png",
+  "capturas": ["docs/img/editor.png", "docs/img/proyectos.png", "docs/img/entrar.png"],
+  "aspectos": [
+    "Colaboración en tiempo real con Yjs sobre WebSocket",
+    "Compilación en contenedores sin red con límites de CPU, RAM y tiempo",
+    "SyncTeX del código al PDF y del PDF al código",
+    "Monorepo pnpm con contratos de API compartidos y documentación OpenAPI"
+  ],
+  "demo": null
+}

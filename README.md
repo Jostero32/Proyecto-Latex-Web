@@ -3,6 +3,32 @@
 Editor LaTeX web, al estilo de Overleaf: proyectos con imágenes, compilación a PDF en un sandbox,
 colaboración en tiempo real con cursores y SyncTeX (del código al PDF y del PDF al código).
 
+![Editor con el PDF compilado](docs/img/editor.png)
+
+| Mis proyectos | Entrar |
+|---|---|
+| ![Lista de proyectos](docs/img/proyectos.png) | ![Inicio de sesión](docs/img/entrar.png) |
+
+## Arquitectura
+```mermaid
+flowchart LR
+    B((Navegador)) -->|"HTTP /api"| S["server<br/>Fastify · API REST"]
+    B <-->|"WebSocket /collab<br/>Yjs"| S
+    S --> PG[("PostgreSQL<br/>Drizzle")]
+    S --> M[("MinIO<br/>archivos y PDF")]
+    S -->|"cola BullMQ"| R[("Redis")]
+    R --> C["compiler<br/>worker"]
+    C -->|"contenedor efímero<br/>sin red · CPU/RAM/tiempo limitados"| T["TeX Live + latexmk"]
+    C --> M
+```
+
+- **Colaboración:** cada documento es un Yjs compartido por Hocuspocus; los cambios y cursores viajan por
+  WebSocket y se guardan en Postgres.
+- **Compilación aislada:** el worker toma el trabajo de la cola, baja los archivos de MinIO, compila en un
+  contenedor de TeX Live sin red y con límites, y sube el PDF, el log y el SyncTeX.
+- **Permisos:** toda acción sobre un proyecto, también en el WebSocket, pasa por la misma verificación de
+  acceso.
+
 ## Requisitos
 - Docker (Docker Desktop o Engine 28 o posterior).
 - Para desarrollar fuera de los contenedores: Node 22 (`.nvmrc`) y pnpm por corepack (`corepack enable pnpm`).
