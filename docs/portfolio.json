@@ -6,6 +6,7 @@
   "stack": ["TypeScript", "React", "Vite", "Fastify", "Yjs", "Hocuspocus", "PostgreSQL", "Drizzle", "Redis", "BullMQ", "MinIO", "Docker", "TeX Live"],
   "estado": "En desarrollo activo",
   "destacado": true,
+  "orden": 2,
   "anio": 2026,
   "rol": "Diseño y desarrollo completo",
   "portada": "docs/img/editor.png",
