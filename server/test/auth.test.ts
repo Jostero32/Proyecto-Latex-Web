@@ -129,7 +129,7 @@ describe('servicio de auth', () => {
   it('guarda el hash argon2id y el sha256 del token de sesión, nunca los valores', async () => {
     const result = await auth.register({ email: 'ana@ejemplo.com', password: 'clave-larga-1' });
     const [user] = await db.select().from(users);
-    expect(user?.passwordHash.startsWith('$argon2id$')).toBe(true);
+    expect(user?.passwordHash?.startsWith('$argon2id$')).toBe(true);
     const stored = await db.select().from(sessions);
     expect(stored.map((s) => s.id)).toEqual([hashToken(result.token)]);
     expect(await verifyPassword('no-es-un-hash', 'clave-larga-1')).toBe(false);

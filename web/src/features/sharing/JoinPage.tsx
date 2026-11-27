@@ -9,7 +9,7 @@ import { Logo } from '../../components/Logo';
 import { Notice } from '../../components/Notice';
 import { ROLE_LABELS } from '../../components/RoleBadge';
 import { errorMessage, isApiError } from '../../lib/api';
-import { useMe } from '../auth/api';
+import { googleLoginUrl, useAuthProviders, useMe } from '../auth/api';
 import { useJoin, useSharePreview } from './api';
 
 const CAN_DO: Record<ProjectRole, string> = {
@@ -23,6 +23,7 @@ export function JoinPage() {
   const { token = '' } = useParams();
   const location = useLocation();
   const me = useMe();
+  const providers = useAuthProviders();
   const preview = useSharePreview(token, Boolean(me.data));
   const back = encodeURIComponent(location.pathname);
 
@@ -32,7 +33,13 @@ export function JoinPage() {
   if (!me.data) {
     content = <SignedOut back={back} />;
   } else if (preview.isError) {
-    content = isApiError(preview.error, 'invalid_link') ? <Expired /> : <Notice tone="error" alert title="No pudimos abrir el enlace">{errorMessage(preview.error)}</Notice>;
+    content = isApiError(preview.error, 'invalid_link') ? <Expired />
+      : isApiError(preview.error, 'invitation_email_mismatch') || isApiError(preview.error, 'google_verification_required')
+        ? <><Notice tone="error" title="Verifica la cuenta invitada">{errorMessage(preview.error)} Sesión actual: {me.data.email}.</Notice>
+          {providers.data?.google && <a className="text-accent-text underline" href={googleLoginUrl(location.pathname, isApiError(preview.error, 'google_verification_required'))}>
+            {isApiError(preview.error, 'google_verification_required') ? 'Vincular mi cuenta Google' : 'Entrar con otra cuenta Google'}
+          </a>}</>
+        : <Notice tone="error" alert title="No pudimos abrir el enlace">{errorMessage(preview.error)}</Notice>;
   } else if (preview.data) {
     content = <Preview token={token} preview={preview.data} email={me.data.email} />;
   }
@@ -90,7 +97,7 @@ function Preview({ token, preview, email }: { token: string; preview: SharePrevi
         variant="primary"
         size="lg"
         disabled={join.isPending}
-        onClick={() => (member && role === preview.currentRole ? open() : join.mutate(undefined, { onSuccess: open }))}
+        onClick={() => join.mutate(undefined, { onSuccess: open })}
       >
         {member && role === preview.currentRole ? 'Abrir el proyecto' : join.isPending ? 'Uniéndote…' : 'Unirme al proyecto'}
       </Button>
@@ -105,7 +112,7 @@ function SignedOut({ back }: { back: string }) {
       <div className="flex flex-col gap-2.5">
         <span className="text-[13px] font-semibold tracking-wider text-accent-text uppercase">Te invitaron a un proyecto</span>
         <h1 className="m-0 font-serif text-[28px] leading-tight font-medium sm:text-[34px]">Entrá para ver cuál es y unirte</h1>
-        <p className="m-0 text-[15px] leading-relaxed text-muted">Con tu cuenta vas a ver el proyecto y el rol que te dieron antes de aceptar.</p>
+        <p className="m-0 text-[15px] leading-relaxed text-muted">Entra con la cuenta Google del correo al que enviaron la invitación. Otra cuenta no podrá aceptarla.</p>
       </div>
       <div className="flex flex-col gap-2.5">
         <PrimaryLink to={`/entrar?modo=entrar&volver=${back}`}>Entrar para unirme</PrimaryLink>

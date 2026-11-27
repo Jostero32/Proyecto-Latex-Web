@@ -15,6 +15,7 @@ import { filesRoutes } from './features/files/routes';
 import { createFilesService, type ProjectLimits } from './features/files/service';
 import { projectsRoutes } from './features/projects/routes';
 import { createProjectsService } from './features/projects/service';
+import type { InvitationEmail } from './features/sharing/email';
 import { sharingRoutes } from './features/sharing/routes';
 import { createSharingService } from './features/sharing/service';
 import {
@@ -36,6 +37,7 @@ export interface ProjectsAppDeps {
   limits: ProjectLimits;
   queue: CompileQueue;
   compile: CompileConfig;
+  invitations?: InvitationEmail;
 }
 
 export interface AppDeps {
@@ -63,7 +65,7 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
   registerSecurityHeaders(app);
   registerRequestGuard(app, security);
   // Sin firma: la cookie de sesión es un token aleatorio de 32 bytes que solo vale si existe en la base.
-  await app.register(cookie);
+  await app.register(cookie, deps.auth?.google ? { secret: deps.auth.google.cookieSecret } : {});
   await registerOpenApi(app, deps.docs ?? true);
   const hocuspocus = deps.projects
     ? createCollab({ db: deps.projects.db, docMaxBytes: deps.projects.limits.docMaxBytes, ...(deps.auth ? { auth: deps.auth.service } : {}) })
@@ -75,7 +77,7 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
       api.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
 
       if (deps.auth) {
-        const auth = deps.auth;
+        const auth = { ...deps.auth, emailInvitations: Boolean(deps.projects?.invitations) };
         registerAuthHooks(api);
         // Contexto encapsulado: el manejador de errores y el rate limit de auth no afectan a otras rutas.
         await api.register(async (scope) => authRoutes(scope, auth));
@@ -88,7 +90,7 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
         const requireUser = createRequireUser(deps.auth.service);
         const projects = createProjectsService({ db, storage, docs, limits });
         const files = createFilesService({ db, storage, docs, limits });
-        const sharing = createSharingService(db, docs);
+        const sharing = createSharingService(db, docs, deps.projects.invitations);
         const compile = createCompileService({ db, storage, docs, queue, config: deps.projects.compile });
         await api.register(async (scope) => {
           registerApiErrorHandler(scope);
@@ -111,7 +113,7 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
           scope.addHook('preHandler', requireUser);
           await projectsRoutes(scope, { db, projects, limits });
           await filesRoutes(scope, { db, files, limits });
-          await sharingRoutes(scope, { db, sharing });
+          await sharingRoutes(scope, { db, sharing, redis: deps.auth?.redis });
           await compileRoutes(scope, { db, compile });
         });
       }

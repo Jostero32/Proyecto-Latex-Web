@@ -1,7 +1,7 @@
 // Menú de la cuenta: quién está conectado, tema y cerrar sesión.
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '../app/theme';
-import { useCurrentUser, useLogout } from '../features/auth/api';
+import { googleLoginUrl, useAuthProviders, useCurrentUser, useLogout } from '../features/auth/api';
 import { Avatar, colorFor } from './Avatar';
 import { Icon } from './Icon';
 import { Menu } from './Menu';
@@ -11,6 +11,8 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
   const navigate = useNavigate();
   const user = useCurrentUser();
   const logout = useLogout();
+  const providers = useAuthProviders();
+  const location = useLocation();
   const name = user.name ?? user.email;
   return (
     <Menu
@@ -22,6 +24,10 @@ export function AccountMenu({ compact = false }: { compact?: boolean }) {
         </span>
       }
       items={[
+        ...(providers.data?.google ? [{
+          label: 'Vincular Google',
+          onSelect: () => window.location.assign(googleLoginUrl(location.pathname + location.search, true)),
+        }] : []),
         { label: 'Tema claro', icon: 'sun', checked: preference === 'claro', onSelect: () => setPreference('claro'), separated: true },
         { label: 'Tema oscuro', icon: 'moon', checked: preference === 'oscuro', onSelect: () => setPreference('oscuro') },
         { label: 'Como el sistema', icon: 'monitor', checked: preference === 'sistema', onSelect: () => setPreference('sistema') },

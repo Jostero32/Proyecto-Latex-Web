@@ -1,6 +1,6 @@
 // Cuentas y sesiones. Ver docs/specs/auth.md.
 import { createHash, randomBytes } from 'node:crypto';
-import { eq, lte } from 'drizzle-orm';
+import { and, eq, isNull, lte } from 'drizzle-orm';
 import { isUniqueViolation, type Db } from '../../db';
 import { sessions, users } from '../../schema';
 import { getDummyHash, hashPassword, isValidPassword, normalizeEmail, verifyPassword } from './passwords';
@@ -27,9 +27,17 @@ export interface SessionResult {
   expiresAt: Date;
 }
 
+/** Identidad verificada por el proveedor OIDC del servidor; nunca tomada directamente del cliente. */
+export interface GoogleIdentity {
+  subject: string;
+  email: string;
+  name?: string;
+}
+
 export interface AuthService {
   register(input: { email: unknown; password: unknown; name?: unknown }): Promise<SessionResult>;
   login(input: { email: unknown; password: unknown }): Promise<SessionResult>;
+  loginWithGoogle(identity: GoogleIdentity, linkUserId?: string): Promise<SessionResult>;
   /** Usuario de una sesión válida, o null (token desconocido o vencido). */
   getUserBySessionToken(token: string): Promise<PublicUser | null>;
   logout(token: string): Promise<void>;
@@ -85,8 +93,46 @@ export function createAuthService(db: Db, options: { now?: () => Date; sessionTt
       // entrada enorme), y se sigue verificando para mantener el mismo tiempo.
       const candidate = isValidPassword(password) ? password : '';
       const ok = await verifyPassword(user?.passwordHash ?? (await getDummyHash()), candidate);
-      if (!user || !ok || candidate === '') {
+      if (!user || !user.passwordHash || !ok || candidate === '') {
         throw new AuthError('invalid_credentials', 'Email o contraseña incorrectos');
+      }
+      return startSession(user);
+    },
+
+    async loginWithGoogle(identity, linkUserId) {
+      const email = normalizeEmail(identity.email);
+      if (!email || !/^[\x21-\x7e]{1,255}$/.test(identity.subject)) throw new AuthError('invalid_credentials', 'Identidad de Google inválida');
+      let user;
+      try {
+        user = await db.transaction(async (tx) => {
+          const linked = await tx.query.users.findFirst({ where: eq(users.googleSubject, identity.subject) });
+          if (linked) {
+            if (linkUserId && linked.id !== linkUserId) throw new AuthError('google_account_conflict', 'La cuenta de Google ya está vinculada');
+            const [refreshed] = await tx.update(users).set({ googleEmail: email }).where(eq(users.id, linked.id)).returning();
+            return refreshed!;
+          }
+          if (linkUserId) {
+            const target = await tx.query.users.findFirst({ where: eq(users.id, linkUserId) });
+            if (!target || target.email !== email || target.googleSubject) {
+              throw new AuthError('google_account_conflict', 'El email de Google debe coincidir con el de tu cuenta');
+            }
+            // La actualización condicional evita sustituir otra vinculación concurrente.
+            const [updated] = await tx.update(users).set({ googleSubject: identity.subject, googleEmail: email })
+              .where(and(eq(users.id, linkUserId), isNull(users.googleSubject))).returning();
+            if (!updated) throw new AuthError('google_account_conflict', 'La cuenta ya se vinculó');
+            return updated;
+          }
+          const existing = await tx.query.users.findFirst({ where: eq(users.email, email) });
+          if (existing) throw new AuthError('google_link_required', 'Entrá con tu contraseña y vinculá Google desde tu cuenta');
+          const name = typeof identity.name === 'string' && !UNSAFE_NAME_CHARACTERS.test(identity.name)
+            ? identity.name.trim().slice(0, NAME_MAX) || null : null;
+          const [created] = await tx.insert(users).values({ email, name, googleSubject: identity.subject, googleEmail: email }).returning();
+          if (!created) throw new Error('no se creó el usuario de Google');
+          return created;
+        });
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new AuthError('google_account_conflict', 'La cuenta cambió; volvé a intentar');
+        throw error;
       }
       return startSession(user);
     },

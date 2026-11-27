@@ -6,12 +6,15 @@ import { sendError } from '../../http';
 import { errors, wrap } from '../../openapi';
 import { createRequireUser, SESSION_COOKIE } from './guard';
 import { AuthError, type AuthService, type SessionResult } from './service';
+import { googleHash, googleRandom, googleReturnPath, GOOGLE_FLOW_SECONDS, type GoogleAuthDeps } from './google';
 
 export interface AuthDeps {
   service: AuthService;
   cookieSecure: boolean;
   /** Almacén del rate limit; sin esto, en memoria (tests). */
   redis?: Redis | undefined;
+  google?: GoogleAuthDeps;
+  emailInvitations?: boolean;
 }
 
 const RATE_LIMIT = { max: 10, timeWindow: 15 * 60 * 1000 };
@@ -33,6 +36,8 @@ const ERROR_STATUS: Record<AuthError['code'], number> = {
   invalid_name: 400,
   email_taken: 409,
   invalid_credentials: 401,
+  google_link_required: 409,
+  google_account_conflict: 409,
 };
 
 export async function authRoutes(app: FastifyInstance, deps: AuthDeps): Promise<void> {
@@ -93,6 +98,78 @@ export async function authRoutes(app: FastifyInstance, deps: AuthDeps): Promise<
     const current = request.cookies[SESSION_COOKIE];
     if (current) await service.logout(current);
   };
+
+  app.get('/auth/providers', {
+    schema: { tags: ['auth'], summary: 'Proveedores de inicio de sesión disponibles', ...noSession,
+      response: { 200: { type: 'object', properties: { google: { type: 'boolean' }, emailInvitations: { type: 'boolean' } }, required: ['google', 'emailInvitations'] } } },
+  }, async () => ({ google: Boolean(deps.google), emailInvitations: Boolean(deps.emailInvitations) }));
+
+  const flowCookie = cookieSecure ? '__Host-pliego-google' : 'pliego-google';
+  const flowCookieOptions = { path: '/', secure: cookieSecure, httpOnly: true, sameSite: 'lax' as const };
+  const failure = (code: string) => `/entrar?modo=entrar&oauth_error=${code}`;
+
+  app.get<{ Querystring: { volver?: string; link?: string } }>('/auth/google', {
+    preHandler: limitAuth,
+    schema: { tags: ['auth'], summary: 'Iniciar OAuth con Google', ...noSession },
+  }, async (request, reply) => {
+    const google = deps.google;
+    if (!google) return reply.redirect(failure('google_unavailable'));
+    try {
+      const current = request.cookies[SESSION_COOKIE];
+      const linkUser = request.query.link === '1' && current ? await service.getUserBySessionToken(current) : null;
+      if (request.query.link === '1' && !linkUser) return reply.redirect(failure('google_link_required'));
+      const state = googleRandom();
+      const browser = googleRandom();
+      const nonce = googleRandom();
+      const verifier = googleRandom();
+      await google.states.put(state, {
+        browserHash: googleHash(browser), nonce, verifier, returnPath: googleReturnPath(request.query.volver),
+        ...(linkUser ? { linkUserId: linkUser.id } : {}),
+      });
+      reply.setCookie(flowCookie, browser, { ...flowCookieOptions, signed: true, maxAge: GOOGLE_FLOW_SECONDS });
+      return reply.redirect(google.provider.authorizationUrl(state, nonce, googleHash(verifier)));
+    } catch {
+      request.log.warn({ event: 'google_oauth_start_failed' }, 'No se pudo iniciar Google');
+      return reply.redirect(failure('google_failed'));
+    }
+  });
+
+  app.get<{ Querystring: { state?: string; code?: string; error?: string } }>('/auth/google/callback', {
+    schema: { tags: ['auth'], summary: 'Retorno de Google OAuth', ...noSession },
+  }, async (request, reply) => {
+    reply.clearCookie(flowCookie, flowCookieOptions);
+    const google = deps.google;
+    if (!google) return reply.redirect(failure('google_unavailable'));
+    try {
+      const state = request.query.state;
+      const signed = request.cookies[flowCookie];
+      const browser = signed ? request.unsignCookie(signed) : null;
+      if (typeof state !== 'string' || !/^[\w-]{43}$/.test(state) || !browser?.valid || !browser.value) {
+        return reply.redirect(failure('google_expired'));
+      }
+      const flow = await google.states.consume(state, googleHash(browser.value));
+      if (!flow) return reply.redirect(failure('google_expired'));
+      if (request.query.error) return reply.redirect(failure('google_cancelled'));
+      const code = request.query.code;
+      if (typeof code !== 'string' || !code || code.length > 4096) return reply.redirect(failure('google_failed'));
+      if (flow.linkUserId) {
+        const token = request.cookies[SESSION_COOKIE];
+        const current = token ? await service.getUserBySessionToken(token) : null;
+        if (!current || current.id !== flow.linkUserId) return reply.redirect(failure('google_expired'));
+      }
+      const identity = await google.provider.exchange(code, flow.verifier, flow.nonce);
+      const session = await service.loginWithGoogle(identity, flow.linkUserId);
+      await dropCurrentSession(request);
+      return setSession(reply, session).redirect(flow.returnPath);
+    } catch (error) {
+      if (error instanceof AuthError && ['google_link_required', 'google_account_conflict'].includes(error.code)) {
+        return reply.redirect(failure(error.code));
+      }
+      // Gaxios puede incluir el client secret y el code en sus errores: nunca registrar el objeto.
+      request.log.warn({ event: 'google_oauth_callback_failed' }, 'No se pudo completar Google');
+      return reply.redirect(failure('google_failed'));
+    }
+  });
 
   // bodyLimit: un email y una contraseña de hasta 256 caracteres entran de sobra en 4 KB.
   app.post('/auth/register', {

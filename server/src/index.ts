@@ -4,8 +4,11 @@ import { buildApp } from './app';
 import { loadConfig } from './config';
 import { closeDb, createDb, migrateDb } from './db';
 import { createAuthService } from './features/auth/service';
+import { createGoogleProvider, createRedisGoogleStates } from './features/auth/google';
+import type { FastifyRequest } from 'fastify';
 import { COLLAB_PATH } from './features/collab/websocket';
 import { createBullCompileQueue } from './features/compile/queue';
+import { createInvitationEmail } from './features/sharing/email';
 import { createStorage } from './storage';
 
 const service: ServiceName = 'server';
@@ -29,13 +32,27 @@ async function main(): Promise<void> {
 
   const app = await buildApp(
     {
-      auth: { service: auth, cookieSecure: config.cookieSecure, redis },
-      projects: { db, storage, limits: config.projects, queue, compile: config.compile },
+      auth: { service: auth, cookieSecure: config.cookieSecure, redis,
+        ...(config.google ? { google: {
+          provider: createGoogleProvider(config.google), states: createRedisGoogleStates(redis), cookieSecret: config.google.cookieSecret,
+        } } : {}),
+      },
+      projects: { db, storage, limits: config.projects, queue, compile: config.compile,
+        ...(config.mail ? { invitations: createInvitationEmail(config.mail.smtp, config.mail.publicUrl) } : {}),
+      },
       security: config.security,
       docs: config.apiDocs,
     },
     // requestTimeout: tiempo máximo para recibir una petición completa (contra subidas lentas).
-    { logger: true, requestTimeout: config.requestTimeoutMs },
+    {
+      logger: {
+        serializers: { req: (request: FastifyRequest) => ({
+          method: request.method, url: request.url.split('?')[0]?.replace(/(\/share\/)[^/]+/, '$1[redacted]'), hostname: request.hostname, remoteAddress: request.ip,
+        }) },
+        redact: ['req.headers.cookie', 'req.headers.authorization'],
+      },
+      requestTimeout: config.requestTimeoutMs,
+    },
   );
 
   // Sesiones vencidas: se rechazan al leerlas; el barrido solo libera espacio.

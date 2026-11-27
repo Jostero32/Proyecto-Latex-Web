@@ -1,6 +1,8 @@
-// Miembros y enlaces de un proyecto (solo el dueño) y unirse con un enlace (cualquiera con sesión).
+// Miembros e invitaciones de un proyecto (solo el dueño); aceptar exige identidad del destinatario.
+import rateLimit from '@fastify/rate-limit';
+import type { Redis } from 'ioredis';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { ASSIGNABLE_ROLES, type CreateShareLinkRequest, type UpdateMemberRequest } from '@latexweb/shared';
+import { ASSIGNABLE_ROLES, type CreateInvitationRequest, type CreateShareLinkRequest, type UpdateMemberRequest } from '@latexweb/shared';
 import type { Db } from '../../db';
 import { empty, errors, idParams, wrap, wrapList } from '../../openapi';
 import { currentUserId } from '../auth/guard';
@@ -10,6 +12,7 @@ import type { SharingService } from './service';
 export interface SharingRoutesDeps {
   db: Db;
   sharing: SharingService;
+  redis?: Redis | undefined;
 }
 
 type WithId = { Params: { id: string } };
@@ -19,9 +22,25 @@ const tags = ['sharing'];
 const role = { type: 'string', enum: [...ASSIGNABLE_ROLES] };
 
 /** Las rutas exigen sesión: se registran detrás de `requireUser`. */
-export async function sharingRoutes(app: FastifyInstance, { db, sharing }: SharingRoutesDeps): Promise<void> {
+export async function sharingRoutes(app: FastifyInstance, { db, sharing, redis }: SharingRoutesDeps): Promise<void> {
   const owned = async (request: FastifyRequest<WithId>) =>
     (await assertProjectAccess(db, currentUserId(request), request.params.id, 'manage')).project.id;
+
+  await app.register(async (scope) => {
+    await scope.register(rateLimit, { global: false, skipOnError: false,
+      ...(redis ? { redis, nameSpace: 'latexweb-invitations-' } : {}) });
+    scope.post<WithId & { Body: CreateInvitationRequest }>('/projects/:id/invitations', {
+      preHandler: scope.rateLimit({ max: 10, timeWindow: 15 * 60 * 1000, keyGenerator: currentUserId }),
+      schema: { tags, summary: 'Enviar invitación al correo verificado del destinatario', params: idParams('id'),
+        body: { type: 'object', properties: { email: { type: 'string', maxLength: 254 }, role,
+          expiresInDays: { type: 'integer', minimum: 1, maximum: 365 } } },
+        response: { 201: wrap('link', 'ShareLink'), ...errors } },
+    }, async (request, reply) => {
+      const link = await sharing.invite(await owned(request), currentUserId(request), request.body?.email,
+        request.body?.role, request.body?.expiresInDays);
+      return reply.code(201).send({ link });
+    });
+  });
 
   app.get<WithId>(
     '/projects/:id/members',

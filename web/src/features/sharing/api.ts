@@ -2,6 +2,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AssignableRole,
+  CreateInvitationRequest,
+  ShareLink,
   CreatedShareLink,
   CreateShareLinkRequest,
   JoinResponse,
@@ -55,6 +57,15 @@ export function useCreateShareLink(projectId: string) {
   return useMutation({
     mutationFn: async (body: CreateShareLinkRequest) =>
       (await api<{ link: CreatedShareLink }>(`${base(projectId)}/share-links`, { method: 'POST', json: body })).link,
+    onSuccess: () => client.invalidateQueries({ queryKey: linksKey(projectId) }),
+  });
+}
+
+export function useInvite(projectId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: CreateInvitationRequest) =>
+      (await api<{ link: ShareLink }>(`${base(projectId)}/invitations`, { method: 'POST', json: body })).link,
     onSuccess: () => client.invalidateQueries({ queryKey: linksKey(projectId) }),
   });
 }

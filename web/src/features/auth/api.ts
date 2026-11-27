@@ -1,9 +1,23 @@
 // Sesión: quién soy (`/auth/me`), entrar, crear cuenta y salir.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AuthResponse, LoginRequest, PublicUser, RegisterRequest } from '@latexweb/shared';
+import type { AuthProvidersResponse, AuthResponse, LoginRequest, PublicUser, RegisterRequest } from '@latexweb/shared';
 import { api, isApiError } from '../../lib/api';
 
 export const meKey = ['me'] as const;
+
+export function useAuthProviders() {
+  return useQuery({
+    queryKey: ['auth', 'providers'],
+    queryFn: () => api<AuthProvidersResponse>('/auth/providers'),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function googleLoginUrl(returnPath: string, link = false): string {
+  const query = new URLSearchParams({ volver: returnPath });
+  if (link) query.set('link', '1');
+  return `/api/auth/google?${query}`;
+}
 
 /** El usuario de la sesión, o null si no hay sesión. */
 export function useMe() {

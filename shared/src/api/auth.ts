@@ -11,7 +11,10 @@ export interface PublicUser {
 export const PASSWORD_MIN_LENGTH = 10;
 export const PASSWORD_MAX_LENGTH = 256;
 
-export type AuthErrorCode = 'invalid_email' | 'weak_password' | 'invalid_name' | 'email_taken' | 'invalid_credentials';
+export type AuthErrorCode = 'invalid_email' | 'weak_password' | 'invalid_name' | 'email_taken' | 'invalid_credentials'
+  | 'google_link_required' | 'google_account_conflict';
+
+export interface AuthProvidersResponse { google: boolean; emailInvitations: boolean }
 
 export interface RegisterRequest { email: string; password: string; name?: string }
 export interface LoginRequest { email: string; password: string }

@@ -119,7 +119,7 @@ describe('miembros y enlaces', () => {
     expect((await owner.post(`/api/share/${editorLink.token}/join`)).json()).toMatchObject({ role: 'owner' });
 
     const listed = (await owner.get(`/api/projects/${project.id}/share-links`)).json<{ links: object[] }>().links;
-    expect(listed).toContainEqual({ id: editorLink.id, role: 'editor', createdAt: editorLink.createdAt, expiresAt: null });
+    expect(listed).toContainEqual({ id: editorLink.id, role: 'editor', createdAt: editorLink.createdAt, expiresAt: null, recipientEmail: null });
     expect(JSON.stringify(listed)).not.toContain(editorLink.token);
 
     const late = await harness.user('tarde@ejemplo.com');

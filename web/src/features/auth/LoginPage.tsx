@@ -10,7 +10,7 @@ import { Icon } from '../../components/Icon';
 import { Logo } from '../../components/Logo';
 import { Notice } from '../../components/Notice';
 import { errorMessage, isApiError } from '../../lib/api';
-import { useLogin, useMe, useRegister } from './api';
+import { googleLoginUrl, useAuthProviders, useLogin, useMe, useRegister } from './api';
 
 const TAGLINE = 'Escribí con LaTeX en el navegador, junto a tu equipo, sin instalar nada.';
 const WEAK = `Tiene que tener entre ${PASSWORD_MIN} y ${PASSWORD_MAX} caracteres.`;
@@ -23,6 +23,15 @@ interface FormError {
   field?: 'name' | 'email' | 'password';
   fieldText?: string;
 }
+
+const GOOGLE_ERRORS: Record<string, FormError> = {
+  google_cancelled: { title: 'No se completó el inicio con Google', text: 'Cancelaste la autorización. Podés volver a intentarlo.' },
+  google_expired: { title: 'La solicitud de Google venció', text: 'Volvé a iniciar el proceso desde este navegador.' },
+  google_failed: { title: 'No pudimos entrar con Google', text: 'Volvé a intentar. También podés usar email y contraseña.' },
+  google_unavailable: { title: 'Google no está disponible', text: 'Por ahora podés entrar con email y contraseña.' },
+  google_link_required: { title: 'Primero entrá con tu contraseña', text: 'Ese email ya tiene una cuenta. Entrá y elegí Vincular Google en el menú de tu cuenta.' },
+  google_account_conflict: { title: 'No se pudo vincular esa cuenta', text: 'Elegí la cuenta de Google con el mismo email de Pliego. Una cuenta de Google solo puede vincularse una vez.' },
+};
 
 function describe(error: unknown): FormError {
   if (isApiError(error, 'email_taken')) {
@@ -48,12 +57,14 @@ export function LoginPage() {
   const me = useMe();
   const login = useLogin();
   const register = useRegister();
+  const providers = useAuthProviders();
+  const googleError = GOOGLE_ERRORS[params.get('oauth_error') ?? ''];
   const [mode, setMode] = useState<Mode>(params.get('modo') === 'entrar' ? 'entrar' : 'crear');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<FormError | null>(null);
+  const [error, setError] = useState<FormError | null>(googleError ?? null);
   const [blockedUntil, setBlockedUntil] = useState<number | null>(null);
   const creating = mode === 'crear';
   const back = safeReturnPath(params.get('volver'));
@@ -66,7 +77,17 @@ export function LoginPage() {
     return () => clearTimeout(timer);
   }, [blockedUntil]);
 
-  if (me.data) return <Navigate to={back} replace />;
+  if (me.data) {
+    if (!googleError) return <Navigate to={back} replace />;
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-5 bg-bg p-6">
+        <div className="w-full max-w-[420px]">
+          <Notice tone="error" alert title={googleError.title}>{googleError.text}</Notice>
+        </div>
+        <Button onClick={() => navigate(back, { replace: true })}>Volver a mis proyectos</Button>
+      </main>
+    );
+  }
 
   const switchMode = (next: Mode) => {
     setMode(next);
@@ -155,6 +176,16 @@ export function LoginPage() {
             <Notice tone="error" alert title={error.title} icon={blockedUntil ? 'clock' : undefined}>
               {error.text}
             </Notice>
+          )}
+
+          {providers.data?.google && (
+            <>
+              <Button variant="secondary" size="lg" disabled={pending || blockedUntil !== null}
+                onClick={() => window.location.assign(googleLoginUrl(back))}>
+                Continuar con Google
+              </Button>
+              <p className="m-0 text-center text-[13px] text-muted">O usá tu email y contraseña</p>
+            </>
           )}
 
           <form onSubmit={submit} className="flex flex-col gap-[18px]">

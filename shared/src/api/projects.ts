@@ -47,6 +47,7 @@ export interface ShareLink {
   role: AssignableRole;
   createdAt: string;
   expiresAt: string | null;
+  recipientEmail: string | null;
 }
 
 /** Solo en la respuesta de creación: el token no se puede volver a ver. */
@@ -77,6 +78,7 @@ export interface CreateProjectRequest { name: string }
 export interface UpdateProjectRequest { name?: string; mainFile?: string; engine?: Engine }
 export interface RenameFileRequest { path: string }
 export interface UpdateMemberRequest { role: AssignableRole }
+export interface CreateInvitationRequest { email: string; role: AssignableRole; expiresInDays?: number }
 export interface CreateShareLinkRequest { role: AssignableRole; expiresInDays?: number }
 
 export type ProjectsErrorCode =
@@ -95,4 +97,8 @@ export type ProjectsErrorCode =
   | 'document_too_large'
   | 'file_too_large'
   | 'cannot_change_owner'
-  | 'invalid_link';
+  | 'invalid_link'
+  | 'invitation_email_mismatch'
+  | 'google_verification_required'
+  | 'email_unavailable'
+  | 'email_delivery_failed';

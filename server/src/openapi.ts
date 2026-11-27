@@ -62,6 +62,7 @@ const COMPONENTS = {
   ShareLink: {
     type: 'object',
     properties: {
+      recipientEmail: { type: ['string', 'null'] },
       id: uuid,
       role: { type: 'string', enum: [...ASSIGNABLE_ROLES] },
       createdAt: dateTime,

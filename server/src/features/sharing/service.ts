@@ -1,4 +1,4 @@
-// Miembros y enlaces para compartir. Lo administra el dueño; unirse con un enlace, cualquiera con sesión.
+// Miembros, enlaces anteriores e invitaciones por correo verificado. Solo el dueño administra.
 import { createHash, randomBytes } from 'node:crypto';
 import {
   ASSIGNABLE_ROLES,
@@ -14,6 +14,8 @@ import { and, asc, eq, gt, isNull, or } from 'drizzle-orm';
 import type { Db } from '../../db';
 import { ApiError } from '../../http';
 import { projectMembers, projects, shareLinks, users } from '../../schema';
+import { normalizeEmail } from '../auth/passwords';
+import type { InvitationEmail } from './email';
 import type { ProjectDocs } from '../collab/documents';
 import { higherRole } from '../projects/service';
 
@@ -34,6 +36,7 @@ const toLink = (row: typeof shareLinks.$inferSelect): ShareLink => ({
   role: row.role,
   createdAt: row.createdAt.toISOString(),
   expiresAt: row.expiresAt?.toISOString() ?? null,
+  recipientEmail: row.recipientEmail,
 });
 
 export interface SharingService {
@@ -41,6 +44,7 @@ export interface SharingService {
   setRole(projectId: string, userId: string, role: unknown): Promise<ProjectMember>;
   removeMember(projectId: string, userId: string): Promise<void>;
   createLink(projectId: string, createdBy: string, role: unknown, expiresInDays: unknown): Promise<CreatedShareLink>;
+  invite(projectId: string, createdBy: string, email: unknown, role: unknown, days: unknown): Promise<ShareLink>;
   links(projectId: string): Promise<ShareLink[]>;
   revokeLink(projectId: string, linkId: string): Promise<void>;
   /** Qué proyecto y rol da el enlace, sin unirse. */
@@ -49,7 +53,7 @@ export interface SharingService {
   join(userId: string, token: string): Promise<JoinResponse>;
 }
 
-export function createSharingService(db: Db, docs: ProjectDocs): SharingService {
+export function createSharingService(db: Db, docs: ProjectDocs, email?: InvitationEmail): SharingService {
   async function member(projectId: string, userId: string): Promise<ProjectMember> {
     const [row] = isUuid(userId)
       ? await db
@@ -68,10 +72,21 @@ export function createSharingService(db: Db, docs: ProjectDocs): SharingService 
       .select()
       .from(shareLinks)
       .where(and(eq(shareLinks.tokenHash, hashShareToken(token)), isNull(shareLinks.revokedAt)));
-    if (!link || (link.expiresAt && link.expiresAt <= new Date())) {
+    if (!link || link.acceptedAt || (link.expiresAt && link.expiresAt <= new Date())) {
       throw new ApiError(404, 'invalid_link', 'El enlace no existe, venció o fue revocado');
     }
     return link;
+  }
+
+  async function checkRecipient(link: typeof shareLinks.$inferSelect, userId: string, query: Pick<Db, 'select'> = db) {
+    if (!link.recipientEmail) return;
+    const [user] = await query.select().from(users).where(eq(users.id, userId));
+    if (!user || user.email !== link.recipientEmail) {
+      throw new ApiError(403, 'invitation_email_mismatch', 'Esta invitación corresponde a otra cuenta. Entra con el correo invitado.');
+    }
+    if (!user.googleSubject || user.googleEmail !== link.recipientEmail) {
+      throw new ApiError(403, 'google_verification_required', 'Vincula la cuenta de Google de este correo para verificar tu identidad.');
+    }
   }
 
   async function changeableMember(projectId: string, userId: string): Promise<ProjectMember> {
@@ -126,6 +141,37 @@ export function createSharingService(db: Db, docs: ProjectDocs): SharingService 
       return { ...toLink(row), token };
     },
 
+    async invite(projectId, createdBy, rawEmail, rawRole, rawDays) {
+      if (!email) throw new ApiError(503, 'email_unavailable', 'El envío de invitaciones no está configurado');
+      const recipientEmail = normalizeEmail(rawEmail);
+      if (!recipientEmail || !/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(recipientEmail)) {
+        throw new ApiError(400, 'invalid_request', 'Introduce una dirección de correo válida');
+      }
+      const role = checkAssignableRole(rawRole);
+      const days = rawDays ?? 7;
+      if (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > MAX_LINK_DAYS) {
+        throw new ApiError(400, 'invalid_request', 'El vencimiento debe estar entre 1 y 365 días');
+      }
+      const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
+      if (!project) throw new ApiError(404, 'not_found', 'El proyecto no existe');
+      const token = randomBytes(32).toString('base64url');
+      const expiresAt = new Date(Date.now() + days * DAY_MS);
+      const [row] = await db.insert(shareLinks).values({
+        projectId, createdBy, role, expiresAt, recipientEmail, tokenHash: hashShareToken(token),
+        // Inactiva hasta que SMTP confirme el envío; un fallo o reinicio no deja un token usable.
+        revokedAt: new Date(),
+      }).returning();
+      if (!row) throw new Error('No se creó la invitación');
+      try {
+        await email.send({ to: recipientEmail, projectName: project.name, role, expiresAt,
+          url: `${email.publicUrl}/unirse/${encodeURIComponent(token)}` });
+        await db.update(shareLinks).set({ revokedAt: null }).where(eq(shareLinks.id, row.id));
+      } catch {
+        throw new ApiError(503, 'email_delivery_failed', 'No se pudo enviar el correo. La invitación quedó invalidada; puedes reintentar.');
+      }
+      return toLink(row);
+    },
+
     async links(projectId) {
       const rows = await db
         .select()
@@ -134,6 +180,7 @@ export function createSharingService(db: Db, docs: ProjectDocs): SharingService 
           and(
             eq(shareLinks.projectId, projectId),
             isNull(shareLinks.revokedAt),
+            isNull(shareLinks.acceptedAt),
             or(isNull(shareLinks.expiresAt), gt(shareLinks.expiresAt, new Date())),
           ),
         )
@@ -154,6 +201,7 @@ export function createSharingService(db: Db, docs: ProjectDocs): SharingService 
 
     async preview(userId, token) {
       const link = await validLink(token);
+      await checkRecipient(link, userId);
       const [project] = await db.select({ name: projects.name }).from(projects).where(eq(projects.id, link.projectId));
       const [owner] = await db
         .select({ name: users.name })
@@ -169,8 +217,13 @@ export function createSharingService(db: Db, docs: ProjectDocs): SharingService 
     },
 
     async join(userId, token) {
-      const link = await validLink(token);
       return db.transaction(async (tx) => {
+        const [link] = await tx.select().from(shareLinks).where(eq(shareLinks.tokenHash, hashShareToken(token))).for('update');
+        if (!link || link.revokedAt || link.acceptedAt || (link.expiresAt && link.expiresAt <= new Date())) {
+          throw new ApiError(404, 'invalid_link', 'El enlace no existe, venció, fue usado o revocado');
+        }
+        await checkRecipient(link, userId, tx);
+        if (link.recipientEmail) await tx.update(shareLinks).set({ acceptedAt: new Date() }).where(eq(shareLinks.id, link.id));
         const [current] = await tx
           .select({ role: projectMembers.role })
           .from(projectMembers)

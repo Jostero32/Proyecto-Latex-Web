@@ -17,7 +17,9 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull().unique(),
   name: text('name'),
-  passwordHash: text('password_hash').notNull(),
+  passwordHash: text('password_hash'),
+  googleSubject: text('google_subject').unique(),
+  googleEmail: text('google_email'),
   createdAt: createdAt(),
 });
 
@@ -99,6 +101,8 @@ export const shareLinks = pgTable(
     createdAt: createdAt(),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    recipientEmail: text('recipient_email'),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
   },
   (table) => [index('share_links_project_id_idx').on(table.projectId).where(sql`${table.revokedAt} is null`)],
 );

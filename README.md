@@ -100,3 +100,59 @@ docs/       roadmap, backlog y specs de cada funcionalidad
 ```
 Cada app tiene su `Dockerfile`, su `vitest.config.ts` y sus tests en `test/`. Plan y estado:
 [`docs/roadmap.md`](docs/roadmap.md). Convenciones de trabajo: [`CLAUDE.md`](CLAUDE.md).
+
+
+## Google e invitaciones por correo (develop)
+
+En el `.env` del servidor configura `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+`SESSION_SECRET` (aleatorio, mínimo 32 bytes; por ejemplo `openssl rand -hex 32`),
+`PUBLIC_URL=https://pliego.duckdns.org` y `COOKIE_SECURE=true`. Los secretos nunca van a Git
+ni a variables `VITE_`. En Google Cloud usa un cliente OAuth de aplicación web:
+
+- Origen autorizado: `https://pliego.duckdns.org`.
+- URI de redirección autorizada exacta: `https://pliego.duckdns.org/api/auth/google/callback`.
+- Configura la pantalla de consentimiento; si está en pruebas, añade los usuarios de prueba.
+
+El callback se deriva de PUBLIC_URL; no hace falta GOOGLE_REDIRECT_URI. Mantén el dominio en
+ALLOWED_HOSTS y ALLOWED_ORIGINS. No uses comodines. El navegador solo se redirige a Google;
+no requiere debilitar CSP ni instalar un SDK externo. Referencia: [Google OIDC](https://developers.google.com/identity/openid-connect/openid-connect).
+
+Para enviar invitaciones configura también:
+
+```dotenv
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SSL=false
+SMTP_USER=tu-cuenta@gmail.com
+SMTP_FROM=tu-cuenta@gmail.com
+SMTP_PASSWORD=tu-contraseña-de-aplicación
+```
+
+En Gmail usa una contraseña de aplicación permitida por tu cuenta. El puerto 587 usa STARTTLS
+obligatorio; 465 requiere SMTP_SSL=true. Consulta [SMTP de Nodemailer](https://nodemailer.com/smtp).
+No hay que abrir un puerto entrante de correo: es una conexión saliente al proveedor SMTP.
+Sin credenciales Google no aparece su botón; sin SMTP no se permite enviar invitaciones.
+La configuración parcial se rechaza al arrancar, sin imprimir los secretos.
+
+Desde Compartir, el dueño indica correo, rol y vencimiento. El correo contiene un enlace de un solo
+uso: abrirlo no añade miembros. Solo lo acepta una cuenta con ese mismo correo verificado por Google;
+funciona en otro navegador después de iniciar sesión. Una cuenta local existente debe entrar primero
+con su contraseña y elegir «Vincular Google» en su menú. No se fusionan cuentas solo por email.
+Otra cuenta recibe 403, sin ver datos del proyecto. Las invitaciones vencidas, revocadas o aceptadas
+no sirven. Los enlaces libres anteriores se identifican como tales y conservan su comportamiento;
+puedes revocarlos desde Compartir. La UI crea únicamente invitaciones vinculadas al destinatario.
+El envío aceptado por SMTP no garantiza entrega en bandeja de entrada: revisa spam y el proveedor.
+
+En un checkout Git del servidor, con cambios locales guardados:
+
+```bash
+git fetch origin
+git switch develop
+git pull --ff-only origin develop
+docker compose up -d --build server web
+```
+
+Las migraciones aditivas se aplican al iniciar el backend; conserva tus respaldos habituales. No borres
+volúmenes. Si tu carpeta del servidor fue copiada sin `.git`, usa el procedimiento de clonación descrito
+arriba y conserva `.env`, el nombre Compose y los volúmenes existentes. Las actualizaciones futuras
+se descargan con el mismo `git pull --ff-only origin develop` y reconstrucción.

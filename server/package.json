@@ -24,7 +24,9 @@
     "crossws": "0.4.17",
     "drizzle-orm": "^0.45.4",
     "fastify": "^5.12.8",
+    "google-auth-library": "^11.3.4",
     "ioredis": "^6.0.0",
+    "nodemailer": "^10.6.1",
     "pg": "^8.23.1",
     "tsx": "^4.23.15",
     "yauzl": "^3.4.0",
@@ -32,6 +34,7 @@
     "yjs": "^13.6.33"
   },
   "devDependencies": {
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "@types/yauzl": "^3.4.0",
     "@types/yazl": "^3.3.1",

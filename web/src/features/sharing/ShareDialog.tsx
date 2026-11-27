@@ -1,5 +1,4 @@
-// Compartir (solo el dueño): miembros con su rol y enlaces para compartir. El enlace recién creado se
-// muestra una sola vez (el server no lo vuelve a dar), con un panel que lo dice claro.
+// Compartir (solo el dueño): miembros e invitaciones por correo verificadas con Google.
 import { useState } from 'react';
 import type { AssignableRole, ProjectMember, ShareLink } from '@latexweb/shared';
 import { Avatar, colorFor } from '../../components/Avatar';
@@ -11,20 +10,16 @@ import { Notice } from '../../components/Notice';
 import { ROLE_ICONS, ROLE_LABELS } from '../../components/RoleBadge';
 import { errorMessage } from '../../lib/api';
 import { shortDate } from '../../lib/format';
-import { joinUrl, useCreateShareLink, useMembers, useRemoveMember, useRevokeShareLink, useSetMemberRole, useShareLinks } from './api';
+import { useAuthProviders } from '../auth/api';
+import { useInvite, useMembers, useRemoveMember, useRevokeShareLink, useSetMemberRole, useShareLinks } from './api';
 
 const EXPIRY_OPTIONS = [
-  { value: 'nunca', label: 'Sin vencimiento' },
   { value: '1', label: 'En 1 día' },
   { value: '7', label: 'En 7 días' },
   { value: '30', label: 'En 30 días' },
   { value: '365', label: 'En 365 días' },
   { value: 'otro', label: 'Otra cantidad…' },
 ];
-
-interface CreatedLink extends ShareLink {
-  url: string;
-}
 
 interface ShareDialogProps {
   open: boolean;
@@ -38,20 +33,21 @@ export function ShareDialog({ open, onClose, projectId, projectName }: ShareDial
   const links = useShareLinks(projectId, open);
   const setRole = useSetMemberRole(projectId);
   const removeMember = useRemoveMember(projectId);
-  const createLink = useCreateShareLink(projectId);
+  const createLink = useInvite(projectId);
+  const providers = useAuthProviders();
   const revokeLink = useRevokeShareLink(projectId);
-  const [created, setCreated] = useState<CreatedLink | null>(null);
+  const [created, setCreated] = useState<ShareLink | null>(null);
   const [newId, setNewId] = useState<string | null>(null);
   const [removing, setRemoving] = useState<ProjectMember | null>(null);
   const [revoking, setRevoking] = useState<ShareLink | null>(null);
   const failed = [setRole, removeMember, createLink, revokeLink].find((m) => m.isError);
 
-  const create = (role: AssignableRole, days: number | null) =>
+  const create = (email: string, role: AssignableRole, days: number) =>
     createLink.mutate(
-      { role, ...(days ? { expiresInDays: days } : {}) },
+      { email, role, expiresInDays: days },
       {
-        onSuccess: ({ token, ...link }) => {
-          setCreated({ ...link, url: joinUrl(token) });
+        onSuccess: (link) => {
+          setCreated(link);
           setNewId(link.id);
         },
       },
@@ -95,13 +91,15 @@ export function ShareDialog({ open, onClose, projectId, projectName }: ShareDial
         <section aria-labelledby="share-links" className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
             <h3 id="share-links" className="m-0 text-sm font-semibold">
-              Enlaces para compartir
+              Invitaciones por correo
             </h3>
             <p className="m-0 text-[13.5px] leading-normal text-muted">
-              Quien abra el enlace entra al proyecto con el rol que elijas. Podés revocarlo cuando quieras.
+              Solo el correo invitado, verificado con Google, puede aceptar. El enlace vence y se usa una sola vez.
             </p>
           </div>
-          {created ? <CreatedPanel link={created} onDone={() => setCreated(null)} /> : <LinkForm pending={createLink.isPending} onCreate={create} />}
+          {created ? <CreatedPanel link={created} onDone={() => setCreated(null)} /> : providers.data?.emailInvitations
+            ? <LinkForm pending={createLink.isPending} onCreate={create} />
+            : <Notice tone="info" title="Envío no disponible">El administrador debe configurar Google y el correo de invitaciones.</Notice>}
           <div className="flex flex-col gap-2">
             <span className="text-[13px] font-semibold text-muted">Enlaces vigentes{links.data ? ` · ${links.data.length}` : ''}</span>
             {links.isPending && <ListPlaceholder rows={1} />}
@@ -123,6 +121,7 @@ export function ShareDialog({ open, onClose, projectId, projectName }: ShareDial
                       {ROLE_LABELS[link.role]}
                     </span>
                     <span className="flex min-w-0 flex-col text-[13px] text-muted">
+                      <span className="truncate" title={link.recipientEmail ?? undefined}>{link.recipientEmail ?? 'Enlace libre (anterior)'}</span>
                       <span>Creado el {shortDate(link.createdAt)}</span>
                       <span>{link.expiresAt ? `Vence el ${shortDate(link.expiresAt)}` : 'Sin vencimiento'}</span>
                     </span>
@@ -242,17 +241,25 @@ function MemberRow({ member, color, first, onRole, onRemove }: MemberRowProps) {
   );
 }
 
-function LinkForm({ pending, onCreate }: { pending: boolean; onCreate: (role: AssignableRole, days: number | null) => void }) {
+function LinkForm({ pending, onCreate }: { pending: boolean; onCreate: (email: string, role: AssignableRole, days: number) => void }) {
+  const [email, setEmail] = useState('');
   const [role, setRole] = useState<AssignableRole>('editor');
-  const [expiry, setExpiry] = useState('30');
+  const [expiry, setExpiry] = useState('7');
   const [days, setDays] = useState('45');
   const custom = expiry === 'otro';
   const parsed = Number(days);
   const badDays = custom && !(Number.isInteger(parsed) && parsed >= 1 && parsed <= 365);
-  const chosenDays = expiry === 'nunca' ? null : custom ? parsed : Number(expiry);
+  const chosenDays = custom ? parsed : Number(expiry);
+  const validEmail = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(email.trim());
 
   return (
     <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-bg p-3.5">
+      <div className="flex w-full flex-col gap-1.5">
+        <label htmlFor="invite-email" className="text-[13px] font-semibold">Correo de la cuenta Google invitada</label>
+        <input id="invite-email" type="email" autoComplete="email" maxLength={254} value={email}
+          onChange={(event) => setEmail(event.target.value)} placeholder="persona@gmail.com"
+          className="h-10 rounded-md border-[1.5px] border-border-input bg-surface px-3 text-sm text-text" />
+      </div>
       <div className="flex flex-col gap-1.5">
         <span id="link-role" className="text-[13px] font-semibold">
           Rol
@@ -308,8 +315,8 @@ function LinkForm({ pending, onCreate }: { pending: boolean; onCreate: (role: As
         </div>
       )}
       <span className="flex-1" />
-      <Button variant="primary" icon="link" disabled={badDays || pending} onClick={() => onCreate(role, chosenDays)} className="h-10">
-        Crear enlace
+      <Button variant="primary" icon="link" disabled={!validEmail || badDays || pending} onClick={() => onCreate(email.trim(), role, chosenDays)} className="h-10">
+        {pending ? 'Enviando…' : 'Enviar invitación'}
       </Button>
       {custom && (
         <span id="link-days-help" className={`w-full text-[13px] ${badDays ? 'text-error' : 'text-muted'}`}>
@@ -320,58 +327,11 @@ function LinkForm({ pending, onCreate }: { pending: boolean; onCreate: (role: As
   );
 }
 
-function CreatedPanel({ link, onDone }: { link: CreatedLink; onDone: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(link.url);
-      setCopied(true);
-    } catch {
-      // Sin permiso para el portapapeles: el campo queda seleccionable a mano.
-    }
-  };
+function CreatedPanel({ link, onDone }: { link: ShareLink; onDone: () => void }) {
   return (
-    <div role="alert" className="flex flex-col gap-3.5 rounded-xl border-2 border-accent bg-accent-soft/50 p-4">
-      <div className="flex items-start gap-3">
-        <span className="flex size-9 flex-none items-center justify-center rounded-full bg-accent text-on-accent">
-          <Icon name="key" size={18} />
-        </span>
-        <div className="flex flex-col gap-0.5">
-          <strong className="text-[15px] font-semibold">Copialo ahora. No lo vas a volver a ver.</strong>
-          <span className="text-[13.5px] leading-normal text-muted">
-            Por seguridad, el enlace se muestra una sola vez. Si lo perdés, revocalo y creá otro.
-          </span>
-        </div>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="created-link" className="sr-only">
-          Enlace para compartir
-        </label>
-        <div className="flex gap-2">
-          <input
-            id="created-link"
-            readOnly
-            value={link.url}
-            onFocus={(event) => event.target.select()}
-            className="h-10 min-w-0 flex-1 rounded-md border-[1.5px] border-border-input bg-surface px-3 font-mono text-[13px] text-text"
-          />
-          <Button variant="primary" icon={copied ? 'check' : 'copy'} onClick={copy} className="h-10">
-            {copied ? 'Copiado' : 'Copiar'}
-          </Button>
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-[13px] text-muted">
-          <span className="flex items-center gap-1 font-semibold text-text">
-            <Icon name={ROLE_ICONS[link.role]} size={14} />
-            {ROLE_LABELS[link.role]}
-          </span>
-          {link.expiresAt ? `Vence el ${shortDate(link.expiresAt)}` : 'Sin vencimiento'}
-        </span>
-        <Button size="sm" onClick={onDone}>
-          Listo, ya lo copié
-        </Button>
-      </div>
-    </div>
+    <Notice tone="success" title="Invitación enviada" actions={<Button size="sm" onClick={onDone}>Invitar a otra persona</Button>}>
+      Enviamos la invitación a <strong>{link.recipientEmail}</strong>. Solo esa cuenta verificada con Google puede aceptarla.
+      {' '}{ROLE_LABELS[link.role]} · Vence el {shortDate(link.expiresAt!)}.
+    </Notice>
   );
 }
