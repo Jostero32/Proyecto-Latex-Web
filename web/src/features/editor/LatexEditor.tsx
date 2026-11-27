@@ -23,6 +23,7 @@ import { tags } from '@lezer/highlight';
 import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import type { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
+import { collaboratorPresence } from './presence';
 
 /** Línea → texto a subrayar (el comando o paquete que falló). */
 export type ErrorLines = Map<number, string | undefined>;
@@ -212,6 +213,7 @@ export const LatexEditor = forwardRef<LatexEditorHandle, LatexEditorProps>(funct
     if (!host.current) return;
     const undoManager = new Y.UndoManager(text);
     const extensions: Extension[] = [
+      EditorView.cspNonce.of(document.querySelector<HTMLMetaElement>('meta[name="csp-nonce"]')?.content ?? ''),
       lineNumbers(),
       errorGutter,
       highlightActiveLineGutter(),
@@ -235,7 +237,8 @@ export const LatexEditor = forwardRef<LatexEditorHandle, LatexEditorProps>(funct
         ...searchKeymap,
         ...defaultKeymap,
       ]),
-      yCollab(text, awareness, { undoManager }),
+      yCollab(text, null, { undoManager }),
+      collaboratorPresence(text, awareness),
       EditorView.contentAttributes.of({ 'aria-label': label }),
       EditorView.updateListener.of((update) => {
         if (!update.selectionSet && !update.docChanged) return;

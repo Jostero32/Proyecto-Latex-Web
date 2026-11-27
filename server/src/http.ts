@@ -58,6 +58,21 @@ export const DEFAULT_ALLOWED_HOSTS: readonly string[] = ['127.0.0.1', 'localhost
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+/** También en errores y rutas inexistentes; no reemplaza el sandbox de las descargas. */
+export function registerSecurityHeaders(app: FastifyInstance): void {
+  app.addHook('onSend', async (_request, reply) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Referrer-Policy', 'no-referrer');
+    reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    if (!reply.hasHeader('Cache-Control')) reply.header('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+    if (!reply.hasHeader('Content-Security-Policy')) {
+      // Swagger configura su propia política; el resto de la API no ejecuta contenido.
+      reply.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+    }
+  });
+}
+
 /** Rechaza un Host no permitido y, en métodos que modifican estado, un Origin no permitido. */
 export function registerRequestGuard(app: FastifyInstance, options: RequestGuardOptions): void {
   app.addHook('onRequest', async (request, reply) => {

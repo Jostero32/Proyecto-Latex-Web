@@ -289,6 +289,25 @@ describe('colaboración en un proyecto', () => {
     expect((await open(viewer)).events).toEqual([{ kind: 'denied' }]);
   });
 
+  it('no aplica mensajes enviados con una sesión cerrada después del upgrade', async () => {
+    const a = await open(owner);
+    await expect.poll(() => a.text(mainId)).toContain('\\documentclass');
+    expect((await owner.post('/api/auth/logout')).statusCode).toBe(204);
+    a.edit(mainId, (text) => text.insert(0, 'SESION_REVOCADA'));
+    await expect.poll(() => a.events).toContainEqual({ kind: 'close', reason: 'session-expired' });
+    // Una sesión nueva comprueba el estado que realmente conservó el servidor.
+    const login = await harness.app.inject({
+      method: 'POST', url: '/api/auth/login', headers: { origin: ORIGIN },
+      payload: { email: 'duena@ejemplo.com', password: 'clave-larga-1' },
+    });
+    const cookie = login.cookies.find((c) => c.name === 'sid');
+    const stored = await harness.app.inject({
+      url: `/api/projects/${project.id}/files/${mainId}`, headers: { cookie: `sid=${cookie?.value}` },
+    });
+    expect(stored.statusCode).toBe(200);
+    expect(stored.body).not.toContain('SESION_REVOCADA');
+  });
+
   it('avisa a los conectados cuando cambian los archivos o el proyecto por REST', async () => {
     const a = await open(owner);
     await owner.upload(`/api/projects/${project.id}/files`, { 'cap.tex': 'x' });

@@ -47,8 +47,10 @@ La primera vez tarda: construye la imagen de TeX Live completa (~5 GB). Después
 | Consola de MinIO | http://127.0.0.1:59001 |
 | Postgres / Redis | `127.0.0.1:55432` / `127.0.0.1:56379` |
 
-Los puertos son poco comunes a propósito, para no chocar con otros proyectos, y solo se publican en
-`127.0.0.1`. El servicio `texlive-image` solo construye la imagen de las compilaciones y termina:
+Los puertos son poco comunes a propósito, para no chocar con otros proyectos. La web publica el
+puerto `55173` en `0.0.0.0`; la API y la infraestructura solo se publican en `127.0.0.1`.
+Para acceder por IP pública o dominio, agrégalo a `ALLOWED_HOSTS` en `.env` y recrea los servicios.
+El servicio `texlive-image` solo construye la imagen de las compilaciones y termina:
 es normal verlo detenido.
 
 > El worker de compilación monta el socket de Docker (equivale a root sobre el host): este compose es
@@ -62,6 +64,22 @@ pnpm dev                    # server, compiler y web (Vite en http://127.0.0.1:5
 ```
 
 ## Comandos
+Para descargar los cambios en una copia clonada desde GitHub:
+
+```sh
+git pull --ff-only origin main
+docker compose up -d --build
+```
+
+El archivo `.env` es propio de cada servidor y no se publica en Git. Para HTTPS, configura
+`ALLOWED_HOSTS` con tu dominio, `ALLOWED_ORIGINS=https://tu-dominio` y `COOKIE_SECURE=true`.
+Si la carpeta del servidor se copió manualmente y no contiene `.git`, clona el repositorio en otra
+carpeta y copia allí tu `.env` antes de levantar Compose. El proyecto Compose se llama `latexweb`,
+por lo que conserva los volúmenes existentes; no uses `down -v` al actualizar.
+
+Las correcciones y la configuración de HSTS de Nginx Proxy Manager están documentadas en
+[`docs/revision-zap-2026-11-27.md`](docs/revision-zap-2026-11-27.md).
+
 | Comando | Qué hace |
 |---|---|
 | `pnpm test` | Tests de todas las apps (con postgres, redis y minio levantados) |

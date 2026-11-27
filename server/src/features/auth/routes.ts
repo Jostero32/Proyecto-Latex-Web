@@ -65,7 +65,7 @@ export async function authRoutes(app: FastifyInstance, deps: AuthDeps): Promise<
   };
   // Respuestas con datos del usuario o Set-Cookie: nunca en una caché compartida.
   app.addHook('onSend', async (_request, reply) => {
-    reply.header('Cache-Control', 'no-store');
+    reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
   });
 
   app.setErrorHandler<FastifyError>((error, request, reply) => {

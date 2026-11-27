@@ -79,6 +79,8 @@ export type CollabNotice = 'files-changed' | 'project-changed';
 /** Contexto de cada conexión de Hocuspocus (lo arma el upgrade con la sesión). */
 export interface CollabContext {
   userId: string;
+  /** Se vuelve a validar antes de procesar cada mensaje (logout y caducidad). */
+  sessionToken?: string;
 }
 
 export interface ProjectDocs {

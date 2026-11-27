@@ -11,3 +11,4 @@
 !web/tsconfig.json
 !web/vite.config.ts
 !web/src
+!web/public

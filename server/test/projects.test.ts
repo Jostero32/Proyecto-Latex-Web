@@ -89,7 +89,7 @@ describe('archivos', () => {
       'content-type': 'image/png',
       'x-content-type-options': 'nosniff',
       'content-security-policy': 'sandbox',
-      'cache-control': 'private, no-store',
+      'cache-control': 'private, no-cache, no-store, must-revalidate',
     });
     expect(image.headers['content-disposition']).toMatch(/^inline; filename="logo.png"/);
 

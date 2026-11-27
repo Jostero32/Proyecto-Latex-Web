@@ -16,6 +16,29 @@ afterEach(async () => {
 });
 
 describe('guardas de Host y Origin', () => {
+  it('Swagger conserva acceso a sus recursos al aplicar la CSP global', async () => {
+    const res = await app.inject({ url: '/api/docs/' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-security-policy']).toContain("script-src 'self'");
+    expect(res.headers['content-security-policy']).toContain("style-src 'self'");
+    expect(res.headers['content-security-policy']).not.toContain('unsafe-inline');
+  });
+
+  it('protege también respuestas rechazadas y rutas inexistentes', async () => {
+    for (const request of [
+      { url: '/api/health' },
+      { url: '/inexistente' },
+      { url: '/api/health', headers: { host: 'evil.com' } },
+    ]) {
+      const res = await app.inject(request);
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+      expect(res.headers['x-frame-options']).toBe('DENY');
+      expect(res.headers['referrer-policy']).toBe('no-referrer');
+      expect(res.headers['cache-control']).toBe('private, no-cache, no-store, must-revalidate');
+      expect(res.headers['content-security-policy']).toContain("default-src 'none'");
+    }
+  });
+
   it.each(['evil.com', '127.0.0.1.evil.com'])('Host %s → 403 forbidden_host', async (host) => {
     const res = await app.inject({ method: 'GET', url: '/api/health', headers: { host } });
     expect(res.statusCode).toBe(403);

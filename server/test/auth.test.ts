@@ -102,7 +102,7 @@ describe('API /api/auth', () => {
     const res = await post('/api/auth/login', { email: 'a@b.cd', password: 'x'.repeat(10_000) });
     expect(res.statusCode).toBe(413);
     const reg = await post('/api/auth/register', { email: 'c@d.ef', password: 'clave-larga-1' });
-    expect(reg.headers['cache-control']).toBe('no-store');
+    expect(reg.headers['cache-control']).toBe('no-cache, no-store, must-revalidate');
     const bidi = await post('/api/auth/register', { email: 'e@f.gh', password: 'clave-larga-1', name: 'Ana‮abc' });
     expect(bidi.json()).toMatchObject({ error: 'invalid_name' });
   });

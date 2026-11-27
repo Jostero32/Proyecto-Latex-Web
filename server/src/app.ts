@@ -22,6 +22,7 @@ import {
   DEFAULT_ALLOWED_ORIGINS,
   registerApiErrorHandler,
   registerRequestGuard,
+  registerSecurityHeaders,
   type RequestGuardOptions,
 } from './http';
 import { registerOpenApi } from './openapi';
@@ -59,12 +60,13 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
   const app = Fastify(options);
   const security = deps.security ?? { allowedOrigins: DEFAULT_ALLOWED_ORIGINS, allowedHosts: DEFAULT_ALLOWED_HOSTS };
 
+  registerSecurityHeaders(app);
   registerRequestGuard(app, security);
   // Sin firma: la cookie de sesión es un token aleatorio de 32 bytes que solo vale si existe en la base.
   await app.register(cookie);
   await registerOpenApi(app, deps.docs ?? true);
   const hocuspocus = deps.projects
-    ? createCollab({ db: deps.projects.db, docMaxBytes: deps.projects.limits.docMaxBytes })
+    ? createCollab({ db: deps.projects.db, docMaxBytes: deps.projects.limits.docMaxBytes, ...(deps.auth ? { auth: deps.auth.service } : {}) })
     : createCollab({ docMaxBytes: DEFAULT_DOC_MAX_BYTES });
   attachCollab(app, hocuspocus, { guard: security, ...(deps.auth ? { auth: deps.auth.service } : {}) });
 

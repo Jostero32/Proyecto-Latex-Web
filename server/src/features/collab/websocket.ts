@@ -37,11 +37,12 @@ type ClientConnection = ReturnType<Hocuspocus['handleConnection']>;
 export interface CollabOptions {
   /** Sin base: documentos en memoria y sin permisos (solo para los tests del upgrade). */
   db?: Db;
+  auth?: AuthService;
   docMaxBytes: number;
 }
 
 /** Hocuspocus con persistencia en `documents`, permisos por proyecto y tope de tamaño. */
-export function createCollab({ db, docMaxBytes }: CollabOptions): Hocuspocus {
+export function createCollab({ db, auth, docMaxBytes }: CollabOptions): Hocuspocus {
   // Tamaño estimado de cada documento abierto: el exacto (codificar el documento) se calcula solo
   // cuando la suma de lo recibido se acerca al tope.
   const estimates = new WeakMap<Document, number>();
@@ -73,7 +74,13 @@ export function createCollab({ db, docMaxBytes }: CollabOptions): Hocuspocus {
           },
         }
       : {}),
-    async beforeHandleMessage({ document, update }) {
+    async beforeHandleMessage({ document, update, context }) {
+      if (auth) {
+        const user = context.sessionToken ? await auth.getUserBySessionToken(context.sessionToken) : null;
+        if (!user || user.id !== context.userId) {
+          throw Object.assign(new Error('sesión inválida'), { code: 4401, reason: 'session-expired' });
+        }
+      }
       let estimate = (estimates.get(document) ?? sizeOf(document)) + update.length;
       if (estimate > docMaxBytes) estimate = sizeOf(document) + update.length;
       estimates.set(document, estimate);
@@ -102,10 +109,10 @@ export function attachCollab(app: FastifyInstance, hocuspocus: Hocuspocus, { gua
         const token = app.parseCookie(request.headers.get('cookie') ?? '')[SESSION_COOKIE];
         const user = auth && token ? await auth.getUserBySessionToken(token) : null;
         if (!user) return new Response(null, { status: 401, statusText: 'Unauthorized' });
-        return { context: { userId: user.id } };
+        return { context: { userId: user.id, sessionToken: token } };
       },
       open(peer) {
-        const context: CollabContext = { userId: String(peer.context.userId) };
+        const context: CollabContext = { userId: String(peer.context.userId), sessionToken: String(peer.context.sessionToken) };
         const connection = hocuspocus.handleConnection(asWebSocketLike(peer.websocket), peer.request, context);
         connections.set(peer, connection);
         // Hocuspocus cierra las conexiones inactivas; un pong cuenta como actividad.

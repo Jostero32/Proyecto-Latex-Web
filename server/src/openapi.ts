@@ -171,5 +171,14 @@ export async function registerOpenApi(app: FastifyInstance, docs: boolean): Prom
     },
     refResolver: { buildLocalReference: (json, _baseUri, _fragment, i) => String(json.$id ?? `def-${i}`) },
   });
-  await app.register(swaggerUi, { routePrefix: DOCS_PATH });
+  await app.register(swaggerUi, {
+    routePrefix: DOCS_PATH,
+    staticCSP: true,
+    transformStaticCSP: () => [
+      "default-src 'none'", "base-uri 'none'", "frame-ancestors 'none'", "object-src 'none'",
+      "connect-src 'self'", "img-src 'self' data:", "font-src 'self'", "form-action 'self'",
+      `script-src 'self' ${app.swaggerCSP.script.join(' ')}`,
+      `style-src 'self' ${app.swaggerCSP.style.join(' ')}`,
+    ].join('; '),
+  });
 }

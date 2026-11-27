@@ -131,7 +131,11 @@ describe('argumentos de docker run', () => {
 
   it('el usuario del contenedor nunca es root', () => {
     expect(resolveContainerUser(() => 0, () => 0)).toEqual({ uid: 10001, gid: 10001 });
-    expect(resolveContainerUser(undefined, undefined)).toEqual({ uid: 10001, gid: 10001 });
+    // Los argumentos undefined activan los valores por defecto de JavaScript: comprueba la
+    // identidad real sin asumir que pnpm test corre como root (macOS y runners de GitHub no lo hacen).
+    const current = resolveContainerUser();
+    expect(current.uid).toBeGreaterThan(0);
+    expect(current.gid).toBeGreaterThan(0);
     expect(resolveContainerUser(() => 1001, () => 1002)).toEqual({ uid: 1001, gid: 1002 });
   });
 });
