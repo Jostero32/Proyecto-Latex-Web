@@ -1,7 +1,7 @@
 // Unirse con un enlace. Con sesión: el proyecto, quién lo comparte y el rol que va a tener la persona
 // (GET /share/:token, sin unirse), y el botón Unirme. Sin sesión: pide entrar y vuelve acá.
-import { Link, useLocation, useNavigate, useParams } from 'react-router';
-import { higherRole, type ProjectRole, type SharePreview } from '@latexweb/shared';
+import { Navigate, Link, useLocation, useNavigate, useParams } from 'react-router';
+import { hasAcceptedPrivacy, higherRole, type ProjectRole, type SharePreview } from '@latexweb/shared';
 import { FullScreenLoading } from '../../app/RequireAuth';
 import { Button } from '../../components/Button';
 import { Icon, type IconName } from '../../components/Icon';
@@ -9,6 +9,8 @@ import { Logo } from '../../components/Logo';
 import { Notice } from '../../components/Notice';
 import { ROLE_LABELS } from '../../components/RoleBadge';
 import { errorMessage, isApiError } from '../../lib/api';
+import { privacyAcceptanceUrl } from '../auth/PrivacyPage';
+import { GoogleButton } from '../auth/GoogleButton';
 import { googleLoginUrl, useAuthProviders, useMe } from '../auth/api';
 import { useJoin, useSharePreview } from './api';
 
@@ -24,9 +26,10 @@ export function JoinPage() {
   const location = useLocation();
   const me = useMe();
   const providers = useAuthProviders();
-  const preview = useSharePreview(token, Boolean(me.data));
+  const preview = useSharePreview(token, Boolean(me.data && hasAcceptedPrivacy(me.data)));
   const back = encodeURIComponent(location.pathname);
 
+  if (me.data && !hasAcceptedPrivacy(me.data)) return <Navigate to={privacyAcceptanceUrl(location.pathname)} replace />;
   if (me.isPending || (me.data && preview.isPending)) return <FullScreenLoading />;
 
   let content;
@@ -36,9 +39,9 @@ export function JoinPage() {
     content = isApiError(preview.error, 'invalid_link') ? <Expired />
       : isApiError(preview.error, 'invitation_email_mismatch') || isApiError(preview.error, 'google_verification_required')
         ? <><Notice tone="error" title="Verifica la cuenta invitada">{errorMessage(preview.error)} Sesión actual: {me.data.email}.</Notice>
-          {providers.data?.google && <a className="text-accent-text underline" href={googleLoginUrl(location.pathname, isApiError(preview.error, 'google_verification_required'))}>
+          {providers.data?.google && <GoogleButton onClick={() => window.location.assign(googleLoginUrl(location.pathname, isApiError(preview.error, 'google_verification_required')))}>
             {isApiError(preview.error, 'google_verification_required') ? 'Vincular mi cuenta Google' : 'Entrar con otra cuenta Google'}
-          </a>}</>
+          </GoogleButton>}</>
         : <Notice tone="error" alert title="No pudimos abrir el enlace">{errorMessage(preview.error)}</Notice>;
   } else if (preview.data) {
     content = <Preview token={token} preview={preview.data} email={me.data.email} />;

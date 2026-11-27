@@ -36,6 +36,13 @@
       "when": 1795811810096,
       "tag": "0004_invitaciones_por_correo",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795813764336,
+      "tag": "0005_aceptaciones_privacidad",
+      "breakpoints": true
     }
   ]
 }

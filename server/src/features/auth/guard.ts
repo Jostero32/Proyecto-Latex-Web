@@ -1,4 +1,5 @@
 // Sesión en cada petición, `requireUser` y la regla CSRF con cookie. Ver docs/specs/auth.md.
+import { hasAcceptedPrivacy } from '@latexweb/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerAsyncHookHandler } from 'fastify';
 import { ApiError, sendError } from '../../http';
 import type { AuthService, PublicUser } from './service';
@@ -34,11 +35,12 @@ export function currentUserId(request: FastifyRequest): string {
 }
 
 /** preHandler que exige una sesión válida y deja el usuario en `request.user`; si no, 401. */
-export function createRequireUser(auth: AuthService): preHandlerAsyncHookHandler {
+export function createRequireUser(auth: AuthService, requirePrivacy = false): preHandlerAsyncHookHandler {
   return async function requireUser(request: FastifyRequest, reply: FastifyReply) {
     const token = request.cookies[SESSION_COOKIE];
     const user = token ? await auth.getUserBySessionToken(token) : null;
     if (!user) return sendError(reply, 401, 'unauthenticated', 'Hay que iniciar sesión');
+    if (requirePrivacy && !hasAcceptedPrivacy(user)) return sendError(reply, 403, 'privacy_acceptance_required', 'Acepta el aviso de privacidad antes de usar Pliego');
     request.user = user;
   };
 }

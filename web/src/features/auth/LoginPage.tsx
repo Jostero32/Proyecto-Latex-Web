@@ -1,8 +1,8 @@
 // Entrar y crear cuenta. Dos columnas en escritorio (marca e ilustración, formulario); en el celular,
 // solo el formulario. La regla de la contraseña (10 a 256 caracteres) se ve antes de equivocarse.
 import { useEffect, useState, type FormEvent } from 'react';
-import { Navigate, useNavigate, useSearchParams } from 'react-router';
-import { PASSWORD_MAX_LENGTH as PASSWORD_MAX, PASSWORD_MIN_LENGTH as PASSWORD_MIN } from '@latexweb/shared';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
+import { hasAcceptedPrivacy, PASSWORD_MAX_LENGTH as PASSWORD_MAX, PASSWORD_MIN_LENGTH as PASSWORD_MIN } from '@latexweb/shared';
 import { safeReturnPath } from '../../app/RequireAuth';
 import { Button } from '../../components/Button';
 import { TextField } from '../../components/Field';
@@ -10,6 +10,8 @@ import { Icon } from '../../components/Icon';
 import { Logo } from '../../components/Logo';
 import { Notice } from '../../components/Notice';
 import { errorMessage, isApiError } from '../../lib/api';
+import { GoogleButton } from './GoogleButton';
+import { privacyAcceptanceUrl } from './PrivacyPage';
 import { googleLoginUrl, useAuthProviders, useLogin, useMe, useRegister } from './api';
 
 const TAGLINE = 'Escribí con LaTeX en el navegador, junto a tu equipo, sin instalar nada.';
@@ -78,7 +80,7 @@ export function LoginPage() {
   }, [blockedUntil]);
 
   if (me.data) {
-    if (!googleError) return <Navigate to={back} replace />;
+    if (!googleError) return <Navigate to={hasAcceptedPrivacy(me.data) ? back : privacyAcceptanceUrl(back)} replace />;
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-5 bg-bg p-6">
         <div className="w-full max-w-[420px]">
@@ -180,13 +182,17 @@ export function LoginPage() {
 
           {providers.data?.google && (
             <>
-              <Button variant="secondary" size="lg" disabled={pending || blockedUntil !== null}
+              <GoogleButton disabled={pending || blockedUntil !== null}
                 onClick={() => window.location.assign(googleLoginUrl(back))}>
                 Continuar con Google
-              </Button>
+              </GoogleButton>
               <p className="m-0 text-center text-[13px] text-muted">O usá tu email y contraseña</p>
             </>
           )}
+
+          <p className="m-0 text-sm leading-relaxed text-muted">
+            Antes de usar tus proyectos te pediremos aceptar el <Link to="/privacidad" target="_blank" rel="noreferrer" className="text-accent-text underline">aviso de privacidad y tratamiento de datos</Link> de ARCM Solutions, tanto con Google como con email.
+          </p>
 
           <form onSubmit={submit} className="flex flex-col gap-[18px]">
             {creating && (

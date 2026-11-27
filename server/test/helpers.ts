@@ -8,7 +8,7 @@ import { createDb, type Db } from '../src/db';
 import { createAuthService, type AuthService } from '../src/features/auth/service';
 import type { CompileQueue, JobSnapshot } from '../src/features/compile/queue';
 import type { ProjectLimits } from '../src/features/files/service';
-import type { CompileJobData } from '@latexweb/shared';
+import { PRIVACY_NOTICE, type CompileJobData } from '@latexweb/shared';
 import { createStorage, type Storage } from '../src/storage';
 
 export const ORIGIN = 'http://localhost:55173';
@@ -97,6 +97,7 @@ export async function projectsApp(db: Db, storage: Storage, limits: ProjectLimit
     queue,
     async user(email) {
       const session = await auth.register({ email, password: 'clave-larga-1', name: email.split('@')[0] });
+      await auth.acceptPrivacy(session.user.id, { accepted: true, version: PRIVACY_NOTICE.version });
       const cookie = `sid=${session.token}`;
       const request = (options: InjectOptions) =>
         app.inject({ ...options, headers: { cookie, origin: ORIGIN, ...(options.headers ?? {}) } });

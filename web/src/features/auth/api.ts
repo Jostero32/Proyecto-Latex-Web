@@ -1,6 +1,6 @@
 // Sesión: quién soy (`/auth/me`), entrar, crear cuenta y salir.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AuthProvidersResponse, AuthResponse, LoginRequest, PublicUser, RegisterRequest } from '@latexweb/shared';
+import type { AcceptPrivacyRequest, AuthProvidersResponse, AuthResponse, LoginRequest, PublicUser, RegisterRequest } from '@latexweb/shared';
 import { api, isApiError } from '../../lib/api';
 
 export const meKey = ['me'] as const;
@@ -73,5 +73,13 @@ export function useLogout() {
       client.clear();
       client.setQueryData(meKey, null);
     },
+  });
+}
+
+export function useAcceptPrivacy() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AcceptPrivacyRequest) => api<AuthResponse>('/auth/privacy/accept', { method: 'POST', json: body }),
+    onSuccess: ({ user }) => { client.setQueryData(meKey, user); },
   });
 }

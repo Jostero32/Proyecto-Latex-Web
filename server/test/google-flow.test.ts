@@ -4,7 +4,7 @@ import { buildApp } from '../src/app';
 import { googleHash, type GoogleProvider, type GoogleStateStore, type GoogleTransaction } from '../src/features/auth/google';
 import type { AuthService } from '../src/features/auth/service';
 
-const user = { id: '123', email: 'ana@example.com', name: 'Ana', createdAt: new Date(0).toISOString() };
+const user = { id: '123', email: 'ana@example.com', name: 'Ana', createdAt: new Date(0).toISOString(), privacy: null };
 const session = { user, token: 'new-session', expiresAt: new Date(Date.now() + 86_400_000) };
 const identity = { subject: 'google-123', email: user.email, name: 'Ana' };
 const apps: FastifyInstance[] = [];
@@ -30,7 +30,7 @@ async function harness() {
   const loginWithGoogle = vi.fn<AuthService['loginWithGoogle']>().mockResolvedValue(session);
   const logout = vi.fn<AuthService['logout']>().mockResolvedValue(undefined);
   const auth: AuthService = {
-    register: vi.fn(), login: vi.fn(), loginWithGoogle, logout,
+    acceptPrivacy: vi.fn(), register: vi.fn(), login: vi.fn(), loginWithGoogle, logout,
     getUserBySessionToken: async (token) => token === 'old-session' ? user : null,
     sweepExpiredSessions: async () => 0,
   };
@@ -109,7 +109,7 @@ describe('flujo HTTP de Google', () => {
 
   it('sin configuración, conserva el login local y no anuncia Google', async () => {
     const app = await buildApp({ auth: { service: {
-      register: vi.fn(), login: vi.fn(), loginWithGoogle: vi.fn(), logout: vi.fn(),
+      acceptPrivacy: vi.fn(), register: vi.fn(), login: vi.fn(), loginWithGoogle: vi.fn(), logout: vi.fn(),
       getUserBySessionToken: async () => null, sweepExpiredSessions: async () => 0,
     }, cookieSecure: false } });
     apps.push(app);

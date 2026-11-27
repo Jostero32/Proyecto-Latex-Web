@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, isNull, lte } from 'drizzle-orm';
 import { isUniqueViolation, type Db } from '../../db';
-import { sessions, users } from '../../schema';
+import { privacyAcceptances, sessions, users } from '../../schema';
 import { getDummyHash, hashPassword, isValidPassword, normalizeEmail, verifyPassword } from './passwords';
 
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -10,7 +10,7 @@ const NAME_MAX = 100;
 const UNSAFE_NAME_CHARACTERS = /[\p{Cc}‪-‮⁦-⁩‎‏]/u;
 
 // Contratos compartidos con la web (shared/src/api/auth.ts).
-import type { AuthErrorCode, PublicUser } from '@latexweb/shared';
+import { PRIVACY_NOTICE, type AuthErrorCode, type PublicUser } from '@latexweb/shared';
 export type { AuthErrorCode, PublicUser };
 
 export class AuthError extends Error {
@@ -40,6 +40,7 @@ export interface AuthService {
   loginWithGoogle(identity: GoogleIdentity, linkUserId?: string): Promise<SessionResult>;
   /** Usuario de una sesión válida, o null (token desconocido o vencido). */
   getUserBySessionToken(token: string): Promise<PublicUser | null>;
+  acceptPrivacy(userId: string, input: { accepted: unknown; version: unknown }): Promise<PublicUser>;
   logout(token: string): Promise<void>;
   sweepExpiredSessions(): Promise<number>;
 }
@@ -52,11 +53,14 @@ export function createAuthService(db: Db, options: { now?: () => Date; sessionTt
   const now = options.now ?? (() => new Date());
   const ttl = options.sessionTtlMs ?? SESSION_TTL_MS;
 
-  async function startSession(user: { id: string; email: string; name: string | null; createdAt: Date }): Promise<SessionResult> {
+  async function startSession(user: typeof users.$inferSelect): Promise<SessionResult> {
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(now().getTime() + ttl);
     await db.insert(sessions).values({ id: hashToken(token), userId: user.id, expiresAt });
-    return { user: toPublic(user), token, expiresAt };
+    const [acceptance] = await db.select().from(privacyAcceptances).where(and(
+      eq(privacyAcceptances.userId, user.id), eq(privacyAcceptances.version, PRIVACY_NOTICE.version),
+    ));
+    return { user: toPublic(user, acceptance), token, expiresAt };
   }
 
   return {
@@ -140,16 +144,31 @@ export function createAuthService(db: Db, options: { now?: () => Date; sessionTt
     async getUserBySessionToken(token) {
       if (!token) return null;
       const [row] = await db
-        .select({ user: users, expiresAt: sessions.expiresAt })
+        .select({ user: users, expiresAt: sessions.expiresAt, acceptance: privacyAcceptances })
         .from(sessions)
         .innerJoin(users, eq(users.id, sessions.userId))
+        .leftJoin(privacyAcceptances, and(eq(privacyAcceptances.userId, users.id), eq(privacyAcceptances.version, PRIVACY_NOTICE.version)))
         .where(eq(sessions.id, hashToken(token)));
       if (!row) return null;
       if (row.expiresAt <= now()) {
         await db.delete(sessions).where(eq(sessions.id, hashToken(token))).catch(() => undefined);
         return null;
       }
-      return toPublic(row.user);
+      return toPublic(row.user, row.acceptance ?? undefined);
+    },
+
+    async acceptPrivacy(userId, input) {
+      if (input.accepted !== true) throw new AuthError('privacy_acceptance_required', 'Marca la casilla para aceptar expresamente el aviso');
+      if (input.version !== PRIVACY_NOTICE.version) throw new AuthError('privacy_version_changed', 'El aviso cambió; vuelve a cargarlo antes de aceptar');
+      return db.transaction(async (tx) => {
+        const [user] = await tx.select().from(users).where(eq(users.id, userId));
+        if (!user) throw new AuthError('invalid_credentials', 'Sesión inválida');
+        await tx.insert(privacyAcceptances).values({ userId, version: PRIVACY_NOTICE.version, acceptedAt: now() }).onConflictDoNothing();
+        const [acceptance] = await tx.select().from(privacyAcceptances).where(and(
+          eq(privacyAcceptances.userId, userId), eq(privacyAcceptances.version, PRIVACY_NOTICE.version),
+        ));
+        return toPublic(user, acceptance);
+      });
     },
 
     async logout(token) {
@@ -164,7 +183,8 @@ export function createAuthService(db: Db, options: { now?: () => Date; sessionTt
   };
 }
 
-function toPublic(user: { id: string; email: string; name: string | null; createdAt: Date }): PublicUser {
-  return { id: user.id, email: user.email, name: user.name, createdAt: user.createdAt.toISOString() };
+function toPublic(user: { id: string; email: string; name: string | null; createdAt: Date }, acceptance?: typeof privacyAcceptances.$inferSelect): PublicUser {
+  return { id: user.id, email: user.email, name: user.name, createdAt: user.createdAt.toISOString(),
+    privacy: acceptance ? { version: acceptance.version, acceptedAt: acceptance.acceptedAt.toISOString() } : null };
 }
 

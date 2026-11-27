@@ -23,6 +23,13 @@ export const users = pgTable('users', {
   createdAt: createdAt(),
 });
 
+/** Historial explícito del aviso: no se atribuye aceptación a cuentas existentes. */
+export const privacyAcceptances = pgTable('privacy_acceptances', {
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  version: text('version').notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [primaryKey({ columns: [table.userId, table.version] })]);
+
 export const sessions = pgTable(
   'sessions',
   {

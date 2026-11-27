@@ -1,3 +1,4 @@
+import { PRIVACY_NOTICE } from '@latexweb/shared';
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,8 +17,10 @@ let owner: SessionResult;
 let projectId: string;
 let messages: InvitationMessage[];
 let failMail: boolean;
-const request = (session: SessionResult, method: 'GET' | 'POST' | 'DELETE', url: string, payload?: object) =>
-  app.inject({ method, url, headers: { cookie: `sid=${session.token}`, origin: ORIGIN }, ...(payload ? { payload } : {}) });
+const request = async (session: SessionResult, method: 'GET' | 'POST' | 'DELETE', url: string, payload?: object) => {
+  await auth.acceptPrivacy(session.user.id, { accepted: true, version: PRIVACY_NOTICE.version });
+  return app.inject({ method, url, headers: { cookie: `sid=${session.token}`, origin: ORIGIN }, ...(payload ? { payload } : {}) });
+};
 const invited = () => `/api/projects/${projectId}/invitations`;
 const sharePath = () => `/api/share/${new URL(messages.at(-1)!.url).pathname.split('/').at(-1)!}`;
 async function invite(email = 'guest@gmail.com') {

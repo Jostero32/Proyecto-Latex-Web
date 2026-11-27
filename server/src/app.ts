@@ -87,7 +87,7 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
         if (!deps.auth) throw new Error('las rutas de proyectos necesitan auth');
         const { db, storage, limits, queue } = deps.projects;
         const docs = createProjectDocs(hocuspocus, db);
-        const requireUser = createRequireUser(deps.auth.service);
+        const requireUser = createRequireUser(deps.auth.service, true);
         const projects = createProjectsService({ db, storage, docs, limits });
         const files = createFilesService({ db, storage, docs, limits });
         const sharing = createSharingService(db, docs, deps.projects.invitations);

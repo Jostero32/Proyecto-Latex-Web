@@ -156,3 +156,29 @@ Las migraciones aditivas se aplican al iniciar el backend; conserva tus respaldo
 volúmenes. Si tu carpeta del servidor fue copiada sin `.git`, usa el procedimiento de clonación descrito
 arriba y conserva `.env`, el nombre Compose y los volúmenes existentes. Las actualizaciones futuras
 se descargan con el mismo `git pull --ff-only origin develop` y reconstrucción.
+
+## Privacidad y aceptación
+
+El aviso público está en `/privacidad`, con ARCM Solutions como responsable y
+jona16lozada@gmail.com como contacto, según la configuración indicada para esta instancia.
+Después de autenticar con Google o contraseña, `/privacidad/aceptar` exige una casilla explícita
+antes de usar proyectos o aceptar invitaciones. Se puede cerrar sesión sin aceptar. También se
+aplica a las cuentas y sesiones existentes: la migración no registra aceptación retroactiva.
+La API de proyectos y el WebSocket comprueban el registro en el servidor.
+
+`privacy_acceptances` conserva usuario, versión y fecha del servidor; no añade IP ni agente del
+navegador. La aceptación es idempotente y persiste en nuevas sesiones. El texto y su versión están
+en `shared/src/privacy.ts`: al modificarlo se debe cambiar la versión para pedir nueva aceptación.
+Los registros históricos se eliminan en cascada al eliminar la cuenta. El consentimiento de Google
+solo autentica; no reemplaza esta aceptación del aviso de Pliego.
+
+El texto describe el tratamiento implementado y el canal de solicitudes. ARCM Solutions debe
+completar y revisar los detalles operativos y legales que correspondan (plazos efectivos de registros
+y respaldos, ubicación/proveedores, transferencias y demás información de su operación). La casilla
+no acredita por sí sola cumplimiento integral de la normativa. Referencia: [SPDP, consentimiento](https://www.spdp.gob.ec/docs/proteccion-de-datos-personales/general/consentimiento/).
+
+El logo del botón procede del [recurso oficial de Google](https://developers.google.com/static/identity/images/g-logo.png)
+y se sirve localmente, sin SDK externo ni cambios que relajen CSP. Referencia: [guía de marca](https://developers.google.com/identity/branding-guidelines).
+
+Descarga `develop` y reconstruye `server` y `web` como se indica arriba. La migración
+`0005_aceptaciones_privacidad.sql` se aplica al arrancar; conserva los respaldos habituales.

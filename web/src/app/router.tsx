@@ -1,6 +1,7 @@
 // Rutas de la web. Mis proyectos y el editor exigen sesión; unirse decide adentro (sin sesión, pide entrar).
 import { lazy, Suspense } from 'react';
 import { createBrowserRouter } from 'react-router';
+import { PrivacyPage, PrivacyAcceptancePage } from '../features/auth/PrivacyPage';
 import { LoginPage } from '../features/auth/LoginPage';
 import { ProjectsPage } from '../features/projects/ProjectsPage';
 import { JoinPage } from '../features/sharing/JoinPage';
@@ -20,6 +21,8 @@ export const router = createBrowserRouter([
     ),
   },
   { path: '/entrar', element: <LoginPage /> },
+  { path: '/privacidad', element: <PrivacyPage /> },
+  { path: '/privacidad/aceptar', element: <PrivacyAcceptancePage /> },
   {
     path: '/proyectos/:id',
     element: (

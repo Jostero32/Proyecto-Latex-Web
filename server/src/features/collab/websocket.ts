@@ -7,6 +7,7 @@
 // Seguridad, en orden: Host y Origin (como la API), la cookie de sesión antes de aceptar el upgrade,
 // y en `onConnect` el permiso sobre el proyecto del documento (`project:<id>`): un lector queda en
 // solo lectura. Un documento no puede crecer más de `docMaxBytes`.
+import { hasAcceptedPrivacy } from '@latexweb/shared';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { Hocuspocus, type Document, type WebSocketLike } from '@hocuspocus/server';
@@ -77,7 +78,7 @@ export function createCollab({ db, auth, docMaxBytes }: CollabOptions): Hocuspoc
     async beforeHandleMessage({ document, update, context }) {
       if (auth) {
         const user = context.sessionToken ? await auth.getUserBySessionToken(context.sessionToken) : null;
-        if (!user || user.id !== context.userId) {
+        if (!user || user.id !== context.userId || !hasAcceptedPrivacy(user)) {
           throw Object.assign(new Error('sesión inválida'), { code: 4401, reason: 'session-expired' });
         }
       }
@@ -109,6 +110,7 @@ export function attachCollab(app: FastifyInstance, hocuspocus: Hocuspocus, { gua
         const token = app.parseCookie(request.headers.get('cookie') ?? '')[SESSION_COOKIE];
         const user = auth && token ? await auth.getUserBySessionToken(token) : null;
         if (!user) return new Response(null, { status: 401, statusText: 'Unauthorized' });
+        if (!hasAcceptedPrivacy(user)) return new Response(null, { status: 403, statusText: 'Privacy acceptance required' });
         return { context: { userId: user.id, sessionToken: token } };
       },
       open(peer) {

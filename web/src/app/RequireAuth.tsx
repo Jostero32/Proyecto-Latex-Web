@@ -1,4 +1,6 @@
 // Rutas privadas: sin sesión, a /entrar?volver=<esta ruta>; después de entrar se vuelve.
+import { hasAcceptedPrivacy } from '@latexweb/shared';
+import { privacyAcceptanceUrl } from '../features/auth/PrivacyPage';
 import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router';
 import { Button } from '../components/Button';
@@ -12,6 +14,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (me.isPending) return <FullScreenLoading />;
   if (me.isError) return <FullScreenError message={errorMessage(me.error)} onRetry={() => void me.refetch()} />;
   if (!me.data) return <Navigate to={`/entrar?volver=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+  if (!hasAcceptedPrivacy(me.data)) return <Navigate to={privacyAcceptanceUrl(location.pathname + location.search)} replace />;
   return children;
 }
 

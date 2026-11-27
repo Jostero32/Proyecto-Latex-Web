@@ -22,8 +22,10 @@ const COMPONENTS = {
   },
   User: {
     type: 'object',
-    properties: { id: uuid, email: { type: 'string' }, name: nullable({ type: 'string' }), createdAt: dateTime },
-    required: ['id', 'email', 'name', 'createdAt'],
+    properties: { id: uuid, email: { type: 'string' }, name: nullable({ type: 'string' }), createdAt: dateTime,
+      privacy: { type: ['object', 'null'], properties: { version: { type: 'string' }, acceptedAt: dateTime }, required: ['version', 'acceptedAt'] },
+    },
+    required: ['id', 'email', 'name', 'createdAt', 'privacy'],
   },
   Project: {
     type: 'object',

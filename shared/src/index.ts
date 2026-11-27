@@ -9,3 +9,5 @@ export * from './api/projects';
 export * from './compilation';
 export * from './env';
 export * from './project-paths';
+
+export * from './privacy';

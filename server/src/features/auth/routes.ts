@@ -1,6 +1,7 @@
 // Rutas /auth. Ver docs/specs/auth.md.
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import rateLimit, { normalizeIP } from '@fastify/rate-limit';
+import { PRIVACY_NOTICE, type AcceptPrivacyRequest } from '@latexweb/shared';
 import type { Redis } from 'ioredis';
 import { sendError } from '../../http';
 import { errors, wrap } from '../../openapi';
@@ -38,6 +39,8 @@ const ERROR_STATUS: Record<AuthError['code'], number> = {
   invalid_credentials: 401,
   google_link_required: 409,
   google_account_conflict: 409,
+  privacy_acceptance_required: 400,
+  privacy_version_changed: 409,
 };
 
 export async function authRoutes(app: FastifyInstance, deps: AuthDeps): Promise<void> {
@@ -98,6 +101,20 @@ export async function authRoutes(app: FastifyInstance, deps: AuthDeps): Promise<
     const current = request.cookies[SESSION_COOKIE];
     if (current) await service.logout(current);
   };
+
+  app.get('/auth/privacy', { schema: { tags: ['auth'], summary: 'Aviso de privacidad vigente', ...noSession } }, async () => PRIVACY_NOTICE);
+  app.post<{ Body: AcceptPrivacyRequest }>('/auth/privacy/accept', {
+    preHandler: requireUser,
+    // Se valida explícitamente: no convertir cadenas "true" en un consentimiento booleano.
+    validatorCompiler: () => () => true,
+    bodyLimit: AUTH_BODY_LIMIT,
+    schema: { tags: ['auth'], summary: 'Registrar aceptación expresa de la versión vigente',
+      body: { type: 'object', properties: { accepted: { type: 'boolean' }, version: { type: 'string' } } },
+      response: { 200: wrap('user', 'User'), ...errors } },
+  }, async (request) => {
+    const body = objectBody(request);
+    return { user: await service.acceptPrivacy(request.user!.id, { accepted: body.accepted, version: body.version }) };
+  });
 
   app.get('/auth/providers', {
     schema: { tags: ['auth'], summary: 'Proveedores de inicio de sesión disponibles', ...noSession,
