@@ -82,6 +82,12 @@ export function registerRequestGuard(app: FastifyInstance, options: RequestGuard
     if (!SAFE_METHODS.has(request.method) && !isAllowedOrigin(request.headers.origin, options, request.headers.host)) {
       return sendError(reply, 403, 'forbidden_origin', 'Origen no permitido');
     }
+    if (!SAFE_METHODS.has(request.method) && request.headers.referer !== undefined) {
+      let origin: string;
+      try { origin = new URL(request.headers.referer).origin; }
+      catch { return sendError(reply, 403, 'forbidden_origin', 'Referer inválido'); }
+      if (!isAllowedOrigin(origin, options, request.headers.host)) return sendError(reply, 403, 'forbidden_origin', 'Referer no permitido');
+    }
   });
 }
 

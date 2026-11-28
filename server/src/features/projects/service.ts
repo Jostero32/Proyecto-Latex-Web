@@ -154,6 +154,9 @@ export function createProjectsService({ db, storage, docs, limits }: ProjectsDep
     },
 
     async update({ project, role }, patch) {
+      if (![patch.name, patch.mainFile, patch.engine].some((value) => value !== undefined)) {
+        throw new ApiError(400, 'invalid_request', 'No hay campos modificables en la petición');
+      }
       const changes: Partial<Pick<Project, 'name' | 'mainFile' | 'engine'>> = {};
       if (patch.name !== undefined) {
         if (!roleAllows(role, 'manage')) throw new ApiError(403, 'forbidden', 'Solo el dueño puede renombrar el proyecto');

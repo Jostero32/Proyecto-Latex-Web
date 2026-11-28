@@ -123,7 +123,7 @@ export async function filesRoutes(app: FastifyInstance, { db, files, limits }: F
         summary: 'Renombrar o mover',
         description: 'Si es el documento principal, el proyecto lo sigue.',
         params: fileParams,
-        body: { type: 'object', properties: { path: { type: 'string', examples: ['capitulos/intro.tex'] } } },
+        body: { type: 'object', additionalProperties: false, properties: { path: { type: 'string', examples: ['capitulos/intro.tex'] } } },
         response: { 200: wrap('file', 'ProjectFile'), ...errors },
       },
     },

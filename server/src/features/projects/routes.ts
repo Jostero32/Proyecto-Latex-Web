@@ -34,7 +34,7 @@ export async function projectsRoutes(app: FastifyInstance, { db, projects, limit
       schema: {
         tags,
         summary: 'Crear un proyecto con un main.tex de plantilla',
-        body: { type: 'object', properties: { name: { type: 'string', examples: ['Tesis'] } } },
+        body: { type: 'object', additionalProperties: false, properties: { name: { type: 'string', examples: ['Tesis'] } } },
         response: { 201: wrap('project', 'Project'), ...errors },
       },
     },
@@ -95,6 +95,7 @@ export async function projectsRoutes(app: FastifyInstance, { db, projects, limit
         params,
         body: {
           type: 'object',
+          additionalProperties: false,
           properties: {
             name: { type: 'string' },
             mainFile: { type: 'string' },

@@ -1,6 +1,8 @@
 // Colaboración de punta a punta: Hocuspocus en el mismo puerto que la API, sesión en el upgrade,
 // permisos por proyecto (lector en solo lectura, ajeno rechazado), cierre de conexiones al quitar
 // permisos, avisos `files-changed`, tope de documento y persistencia en Postgres.
+import { and, eq } from 'drizzle-orm';
+import { projectMembers } from '../src/schema';
 import type { AddressInfo } from 'node:net';
 import { connect } from 'node:net';
 import type { ProjectFile, ProjectSummary } from '@latexweb/shared';
@@ -306,6 +308,22 @@ describe('colaboración en un proyecto', () => {
     });
     expect(stored.statusCode).toBe(200);
     expect(stored.body).not.toContain('SESION_REVOCADA');
+  });
+
+  it('relee el rol y la membresía de cada mensaje aunque cambien fuera de esta instancia', async () => {
+    const editor = await member('otro-nodo@ejemplo.com', 'editor');
+    const socket = await open(editor);
+    await expect.poll(() => socket.text(mainId)).toContain('\\documentclass');
+    const key = and(eq(projectMembers.projectId, project.id), eq(projectMembers.userId, editor.userId));
+    // No usa el servicio ni docs.disconnect: simula otro nodo o una revocación administrativa.
+    await db.update(projectMembers).set({ role: 'viewer' }).where(key);
+    socket.edit(mainId, (text) => text.insert(0, 'ROL_ANTIGUO_NO_DEBE_ESCRIBIR'));
+    await expect.poll(() => socket.events).toContainEqual({ kind: 'saved', ok: false });
+    expect((await owner.get(`/api/projects/${project.id}/files/${mainId}`)).body).not.toContain('ROL_ANTIGUO');
+    await db.delete(projectMembers).where(key);
+    socket.edit(mainId, (text) => text.insert(0, 'MIEMBRO_REVOCADO'));
+    await expect.poll(() => socket.events).toContainEqual({ kind: 'close', reason: 'permissions-changed' });
+    expect((await owner.get(`/api/projects/${project.id}/files/${mainId}`)).body).not.toContain('MIEMBRO_REVOCADO');
   });
 
   it('avisa a los conectados cuando cambian los archivos o el proyecto por REST', async () => {

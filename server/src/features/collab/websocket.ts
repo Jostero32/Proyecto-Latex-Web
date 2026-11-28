@@ -75,11 +75,22 @@ export function createCollab({ db, auth, docMaxBytes }: CollabOptions): Hocuspoc
           },
         }
       : {}),
-    async beforeHandleMessage({ document, update, context }) {
+    async beforeHandleMessage({ document, documentName, update, context, connection }) {
       if (auth) {
         const user = context.sessionToken ? await auth.getUserBySessionToken(context.sessionToken) : null;
         if (!user || user.id !== context.userId || !hasAcceptedPrivacy(user)) {
           throw Object.assign(new Error('sesión inválida'), { code: 4401, reason: 'session-expired' });
+        }
+      }
+      if (db) {
+        const projectId = projectIdOf(documentName);
+        if (!projectId || !context.userId) throw new Error('documento o sesión inválidos');
+        try {
+          const { role } = await assertProjectAccess(db, context.userId, projectId, 'read');
+          // También detecta cambios desde otra instancia o directamente en BD, sin reconexión.
+          connection.readOnly = !roleAllows(role, 'write');
+        } catch {
+          throw Object.assign(new Error('permisos revocados'), { code: 4403, reason: 'permissions-changed' });
         }
       }
       let estimate = (estimates.get(document) ?? sizeOf(document)) + update.length;

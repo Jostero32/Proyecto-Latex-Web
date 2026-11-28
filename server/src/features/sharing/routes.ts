@@ -32,7 +32,7 @@ export async function sharingRoutes(app: FastifyInstance, { db, sharing, redis }
     scope.post<WithId & { Body: CreateInvitationRequest }>('/projects/:id/invitations', {
       preHandler: scope.rateLimit({ max: 10, timeWindow: 15 * 60 * 1000, keyGenerator: currentUserId }),
       schema: { tags, summary: 'Enviar invitación al correo verificado del destinatario', params: idParams('id'),
-        body: { type: 'object', properties: { email: { type: 'string', maxLength: 254 }, role,
+        body: { type: 'object', additionalProperties: false, properties: { email: { type: 'string', maxLength: 254 }, role,
           expiresInDays: { type: 'integer', minimum: 1, maximum: 365 } } },
         response: { 201: wrap('link', 'ShareLink'), ...errors } },
     }, async (request, reply) => {
@@ -56,7 +56,7 @@ export async function sharingRoutes(app: FastifyInstance, { db, sharing, redis }
         summary: 'Cambiar el rol de un miembro',
         description: 'Sus conexiones en vivo se cierran y vuelven a entrar con el rol nuevo.',
         params: idParams('id', 'userId'),
-        body: { type: 'object', properties: { role } },
+        body: { type: 'object', additionalProperties: false, properties: { role } },
         response: { 200: wrap('member', 'Member'), ...errors },
       },
     },
@@ -80,7 +80,7 @@ export async function sharingRoutes(app: FastifyInstance, { db, sharing, redis }
         summary: 'Crear un enlace para compartir',
         description: 'El token se devuelve solo aquí; se guarda su hash.',
         params: idParams('id'),
-        body: { type: 'object', properties: { role, expiresInDays: { type: 'integer', minimum: 1, maximum: 365 } } },
+        body: { type: 'object', additionalProperties: false, properties: { role, expiresInDays: { type: 'integer', minimum: 1, maximum: 365 } } },
         response: { 201: wrap('link', 'ShareLink'), ...errors },
       },
     },
