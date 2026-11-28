@@ -15,6 +15,7 @@ import crossws from 'crossws/adapters/node';
 import type { FastifyInstance } from 'fastify';
 import * as Y from 'yjs';
 import type { Db } from '../../db';
+import { sha256, type MutationAudit } from '../audit/service';
 import { isAllowedHost, isAllowedOrigin, type RequestGuardOptions } from '../../http';
 import { SESSION_COOKIE } from '../auth/guard';
 import type { AuthService } from '../auth/service';
@@ -39,14 +40,17 @@ export interface CollabOptions {
   /** Sin base: documentos en memoria y sin permisos (solo para los tests del upgrade). */
   db?: Db;
   auth?: AuthService;
+  audit?: MutationAudit;
   docMaxBytes: number;
 }
 
 /** Hocuspocus con persistencia en `documents`, permisos por proyecto y tope de tamaño. */
-export function createCollab({ db, auth, docMaxBytes }: CollabOptions): Hocuspocus {
+export function createCollab({ db, auth, audit, docMaxBytes }: CollabOptions): Hocuspocus {
   // Tamaño estimado de cada documento abierto: el exacto (codificar el documento) se calcula solo
   // cuando la suma de lo recibido se acerca al tope.
   const estimates = new WeakMap<Document, number>();
+  const pending = new WeakMap<object, { id: string; changed: boolean; after: Record<string, unknown> | null }>();
+  const snapshotHash = (doc: Document) => sha256(Y.encodeSnapshot(Y.snapshot(doc)));
   const sizeOf = (document: Document) => Y.encodeStateAsUpdate(document).length;
 
   return new Hocuspocus<CollabContext>({
@@ -75,6 +79,37 @@ export function createCollab({ db, auth, docMaxBytes }: CollabOptions): Hocuspoc
           },
         }
       : {}),
+    async beforeSync({ document, documentName, connection, context, type, payload }) {
+      if (!audit || (type !== 1 && type !== 2)) return;
+      // Sync inicial y retransmisiones sin cambios no generan filas de mutación.
+      if (Y.snapshotContainsUpdate(Y.snapshot(document), payload)) return;
+      const projectId = projectIdOf(documentName);
+      if (!projectId || !context.userId) throw new Error('documento o sesión inválidos');
+      const id = await audit.begin({ actorId: context.userId, projectId, resourceId: projectId,
+        source: 'collab', action: 'document.update', before: { snapshotSha256: snapshotHash(document) } });
+      pending.set(connection, { id, changed: false, after: null });
+    },
+    async onChange({ document, connection, update }) {
+      // El origen real del update identifica al actor; no atribuir los cambios REST ni de otros peers.
+      const event = connection ? pending.get(connection) : undefined;
+      if (event) {
+        event.changed = true;
+        event.after = { snapshotSha256: snapshotHash(document), updateSha256: sha256(update) };
+      }
+    },
+    async afterHandleMessage({ connection }) {
+      const event = pending.get(connection);
+      if (!event || !audit) return;
+      pending.delete(connection);
+      try {
+        await audit.finish(event.id, { after: event.after,
+          outcome: event.changed ? 'applied' : connection.readOnly ? 'denied' : 'unchanged' });
+      } catch {
+        // El update puede haberse aplicado: queda intención pendiente; no fingir rollback.
+        connection.close({ code: 1011, reason: 'audit-unavailable' });
+        throw new Error('No se pudo finalizar la bitácora de colaboración');
+      }
+    },
     async beforeHandleMessage({ document, documentName, update, context, connection }) {
       if (auth) {
         const user = context.sessionToken ? await auth.getUserBySessionToken(context.sessionToken) : null;

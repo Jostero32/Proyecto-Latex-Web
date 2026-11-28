@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import yazl from 'yazl';
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/app';
+import type { MutationAudit } from '../src/features/audit/service';
 import { createDb, type Db } from '../src/db';
 import { createAuthService, type AuthService } from '../src/features/auth/service';
 import type { CompileQueue, JobSnapshot } from '../src/features/compile/queue';
@@ -32,7 +33,7 @@ export function testStorage(): Storage {
 
 /** Vacía todas las tablas de la app. */
 export async function resetDb(db: Db): Promise<void> {
-  await db.execute(sql`TRUNCATE users, sessions, projects, compilations CASCADE`);
+  await db.execute(sql`TRUNCATE mutation_audit, users, sessions, projects, compilations CASCADE`);
 }
 
 export const LIMITS: ProjectLimits = { maxBytes: 1024 * 1024, maxFiles: 20, fileMaxBytes: 512 * 1024, docMaxBytes: 256 * 1024 };
@@ -84,12 +85,12 @@ export interface ProjectsHarness {
   user(email: string): Promise<Client>;
 }
 
-export async function projectsApp(db: Db, storage: Storage, limits: ProjectLimits = LIMITS): Promise<ProjectsHarness> {
+export async function projectsApp(db: Db, storage: Storage, limits: ProjectLimits = LIMITS, audit?: MutationAudit): Promise<ProjectsHarness> {
   const auth = createAuthService(db);
   const queue = fakeQueue();
   const app = await buildApp({
     auth: { service: auth, cookieSecure: false },
-    projects: { db, storage, limits, queue, compile: { maxQueued: 5, ttlSeconds: 3600 } },
+    projects: { db, storage, limits, queue, ...(audit ? { audit } : {}), compile: { maxQueued: 5, ttlSeconds: 3600 } },
   });
   return {
     app,

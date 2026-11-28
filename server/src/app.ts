@@ -4,6 +4,9 @@ import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Db } from './db';
+import { registerMutationAudit } from './features/audit/hooks';
+import { auditRoutes } from './features/audit/routes';
+import { createMutationAudit, type MutationAudit } from './features/audit/service';
 import { createRequireUser, registerAuthHooks } from './features/auth/guard';
 import { authRoutes, type AuthDeps } from './features/auth/routes';
 import { createProjectDocs } from './features/collab/documents';
@@ -38,6 +41,7 @@ export interface ProjectsAppDeps {
   queue: CompileQueue;
   compile: CompileConfig;
   invitations?: InvitationEmail;
+  audit?: MutationAudit;
 }
 
 export interface AppDeps {
@@ -67,8 +71,9 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
   // Sin firma: la cookie de sesión es un token aleatorio de 32 bytes que solo vale si existe en la base.
   await app.register(cookie, deps.auth?.google ? { secret: deps.auth.google.cookieSecret } : {});
   await registerOpenApi(app, deps.docs ?? true);
+  const audit = deps.projects ? deps.projects.audit ?? createMutationAudit(deps.projects.db) : undefined;
   const hocuspocus = deps.projects
-    ? createCollab({ db: deps.projects.db, docMaxBytes: deps.projects.limits.docMaxBytes, ...(deps.auth ? { auth: deps.auth.service } : {}) })
+    ? createCollab({ ...(audit ? { audit } : {}), db: deps.projects.db, docMaxBytes: deps.projects.limits.docMaxBytes, ...(deps.auth ? { auth: deps.auth.service } : {}) })
     : createCollab({ docMaxBytes: DEFAULT_DOC_MAX_BYTES });
   attachCollab(app, hocuspocus, { guard: security, ...(deps.auth ? { auth: deps.auth.service } : {}) });
 
@@ -111,6 +116,9 @@ export async function buildApp(deps: AppDeps = {}, options: FastifyServerOptions
             },
           });
           scope.addHook('preHandler', requireUser);
+          if (!audit) throw new Error('falta servicio de auditoría');
+          registerMutationAudit(scope, db, docs, audit);
+          await auditRoutes(scope, audit);
           await projectsRoutes(scope, { db, projects, limits });
           await filesRoutes(scope, { db, files, limits });
           await sharingRoutes(scope, { db, sharing, redis: deps.auth?.redis });

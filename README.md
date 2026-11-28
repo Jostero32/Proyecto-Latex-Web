@@ -182,3 +182,16 @@ y se sirve localmente, sin SDK externo ni cambios que relajen CSP. Referencia: [
 
 Descarga `develop` y reconstruye `server` y `web` como se indica arriba. La migración
 `0005_aceptaciones_privacidad.sql` se aplica al arrancar; conserva los respaldos habituales.
+
+## Permisos y bitácora de cambios
+
+El rol de colaboración se vuelve a consultar en PostgreSQL en cada mensaje. Los campos adicionales
+no pueden cambiar identidad ni privilegios; las operaciones permitidas al dueño siguen funcionando.
+La migración `0006_bitacora_mutaciones.sql` añade una bitácora HTTP/WebSocket con actor de sesión,
+recurso, resultado y metadatos antes/después, sin copiar texto ni tokens. El dueño consulta los
+últimos eventos en `GET /api/projects/:id/audit-events?limit=50` (máximo 100).
+
+El aviso `2026-11-27.2` explica el historial, requiere nueva aceptación y debe desplegarse
+reconstruyendo **server y web**. La bitácora se conserva al borrar proyectos; los registros pendientes
+exigen comprobar el estado real antes de repetir la operación. Detalles, pruebas y límites en
+[revisión de peticiones manipuladas](docs/revision-peticiones-manipuladas.md).

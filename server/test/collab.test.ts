@@ -2,7 +2,7 @@
 // permisos por proyecto (lector en solo lectura, ajeno rechazado), cierre de conexiones al quitar
 // permisos, avisos `files-changed`, tope de documento y persistencia en Postgres.
 import { and, eq } from 'drizzle-orm';
-import { projectMembers } from '../src/schema';
+import { mutationAudit, projectMembers } from '../src/schema';
 import type { AddressInfo } from 'node:net';
 import { connect } from 'node:net';
 import type { ProjectFile, ProjectSummary } from '@latexweb/shared';
@@ -247,6 +247,13 @@ describe('colaboración en un proyecto', () => {
     await expect.poll(() => b.text(mainId)).toMatch(/^% hola desde A\n/);
     const file = `/api/projects/${project.id}/files/${mainId}`;
     expect((await owner.get(file)).body).toMatch(/^% hola desde A\n/);
+    await expect.poll(async () => (await db.select().from(mutationAudit).where(and(
+      eq(mutationAudit.projectId, project.id), eq(mutationAudit.source, 'collab'), eq(mutationAudit.outcome, 'applied'),
+    ))).length).toBe(1);
+    const [entry] = await db.select().from(mutationAudit).where(eq(mutationAudit.source, 'collab'));
+    expect(entry).toMatchObject({ actorId: owner.userId, outcome: 'applied' });
+    expect(entry?.before?.snapshotSha256).not.toBe(entry?.after?.snapshotSha256);
+    expect(JSON.stringify(entry)).not.toContain('hola desde A');
 
     // Al cerrar, el server guarda los documentos abiertos; otro server los lee de Postgres.
     await harness.app.close();
@@ -258,6 +265,27 @@ describe('colaboración en un proyecto', () => {
     expect(main?.size).toBe(Buffer.byteLength(after.body));
   });
 
+  it('atribuye updates concurrentes a sus sesiones y registra también un borrado de texto', async () => {
+    const editor = await member('concurrente@ejemplo.com', 'editor');
+    const a = await open(owner);
+    const b = await open(editor);
+    await expect.poll(() => b.text(mainId)).toContain('\\documentclass');
+    a.edit(mainId, (text) => text.insert(0, 'PRIVADO_A'));
+    b.edit(mainId, (text) => text.insert(0, 'PRIVADO_B'));
+    const events = () => db.select().from(mutationAudit).where(and(
+      eq(mutationAudit.projectId, project.id), eq(mutationAudit.source, 'collab'), eq(mutationAudit.outcome, 'applied'),
+    ));
+    await expect.poll(async () => (await events()).map((e) => e.actorId).sort()).toEqual([owner.userId, editor.userId].sort());
+    await expect.poll(() => a.text(mainId)).toContain('PRIVADO_B');
+    a.edit(mainId, (text) => text.delete(0, 1));
+    await expect.poll(async () => (await events()).length).toBe(3);
+    for (const event of await events()) {
+      expect(event.before?.snapshotSha256).not.toBe(event.after?.snapshotSha256);
+      expect(event.after?.updateSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(JSON.stringify(event)).not.toContain('PRIVADO_');
+    }
+  });
+
   it('un lector entra en solo lectura y sus cambios no se aplican; un ajeno es rechazado', async () => {
     const a = await open(owner);
     const viewer = await open(await member('lector@ejemplo.com', 'viewer'));
@@ -267,6 +295,9 @@ describe('colaboración en un proyecto', () => {
     viewer.edit(mainId, (text) => text.insert(0, 'INTRUSO'));
     await expect.poll(() => viewer.events).toContainEqual({ kind: 'saved', ok: false });
     expect(a.text(mainId)).not.toContain('INTRUSO');
+    await expect.poll(async () => (await db.select().from(mutationAudit).where(and(
+      eq(mutationAudit.projectId, project.id), eq(mutationAudit.source, 'collab'), eq(mutationAudit.outcome, 'denied'),
+    ))).length).toBe(1);
     expect((await owner.get(`/api/projects/${project.id}/files/${mainId}`)).body).not.toContain('INTRUSO');
 
     const stranger = await open(await harness.user('ajena@ejemplo.com'));

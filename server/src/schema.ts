@@ -1,7 +1,7 @@
 // Todas las tablas. Para cambiarlas: editar aquí y `pnpm db:generate` (el server migra al arrancar).
 import { ASSIGNABLE_ROLES, ENGINES, FILE_KINDS, PROJECT_ROLES } from '@latexweb/shared';
 import { sql } from 'drizzle-orm';
-import { bigint, customType, index, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Uint8Array; driverData: Buffer }>({
   dataType: () => 'bytea',
@@ -131,3 +131,19 @@ export const compilations = pgTable(
   },
   (table) => [index('compilations_project_id_idx').on(table.projectId)],
 );
+
+/** Sin FK a proyectos/usuarios: borrar el recurso no borra su trazabilidad. Solo metadatos. */
+export const mutationAudit = pgTable('mutation_audit', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  actorId: uuid('actor_id').notNull(),
+  projectId: uuid('project_id'),
+  resourceId: text('resource_id'),
+  action: text('action').notNull(),
+  source: text('source', { enum: ['http', 'collab'] }).notNull(),
+  outcome: text('outcome', { enum: ['pending', 'applied', 'unchanged', 'denied', 'failed'] }).notNull().default('pending'),
+  statusCode: integer('status_code'),
+  before: jsonb('before_snapshot').$type<Record<string, unknown> | null>(),
+  after: jsonb('after_snapshot').$type<Record<string, unknown> | null>(),
+  createdAt: createdAt(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, (table) => [index('mutation_audit_project_created_idx').on(table.projectId, table.createdAt, table.id)]);

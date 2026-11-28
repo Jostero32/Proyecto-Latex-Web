@@ -6,7 +6,7 @@ import { buildApp } from '../src/app';
 import { closeDb } from '../src/db';
 import { createAuthService, type SessionResult } from '../src/features/auth/service';
 import type { InvitationMessage } from '../src/features/sharing/email';
-import { shareLinks } from '../src/schema';
+import { mutationAudit, shareLinks } from '../src/schema';
 import { fakeQueue, LIMITS, ORIGIN, resetDb, testDb, testStorage } from './helpers';
 
 const db = testDb();
@@ -27,6 +27,8 @@ async function invite(email = 'guest@gmail.com') {
   const response = await request(owner, 'POST', invited(), { email, role: 'editor' });
   expect(response.statusCode).toBe(201);
   expect(response.json().link).not.toHaveProperty('token');
+  const token = new URL(messages.at(-1)!.url).pathname.split('/').at(-1)!;
+  expect(JSON.stringify(await db.select().from(mutationAudit))).not.toContain(token);
   return response.json().link as { id: string; recipientEmail: string };
 }
 beforeEach(async () => {
